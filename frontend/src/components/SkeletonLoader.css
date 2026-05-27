@@ -1,0 +1,110 @@
+@keyframes shimmer {
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: calc(200px + 100%) 0;
+  }
+}
+
+.skeleton-block {
+  background: linear-gradient(
+    90deg,
+    #e8e8e8 25%,
+    #f5f5f5 50%,
+    #e8e8e8 75%
+  );
+  background-size: 200px 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+/* Dark mode support using Cloudscape-compatible colors */
+.awsui-dark .skeleton-block {
+  background: linear-gradient(
+    90deg,
+    #1a1a2e 25%,
+    #2a2a3e 50%,
+    #1a1a2e 75%
+  );
+  background-size: 200px 100%;
+}
+
+/* Cards variant: CSS grid layout */
+.skeleton-cards {
+  display: grid;
+  gap: 16px;
+}
+
+.skeleton-card {
+  height: 120px;
+}
+
+/* Table variant: stacked rows */
+.skeleton-table {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.skeleton-table-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 12px;
+}
+
+.skeleton-table-cell {
+  height: 20px;
+}
+
+.skeleton-table-header {
+  height: 16px;
+  opacity: 0.6;
+}
+
+/* Chart variant: single block */
+.skeleton-chart {
+  width: 100%;
+}
+
+/* Container variant: block with internal padding */
+.skeleton-container {
+  padding: 20px;
+  border-radius: 8px;
+  min-height: 100px;
+}
+
+.skeleton-container-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.skeleton-container-line {
+  height: 16px;
+  border-radius: 4px;
+}
+
+/* Key-value variant: label + value pairs in grid */
+.skeleton-key-value {
+  display: grid;
+  gap: 16px;
+}
+
+.skeleton-kv-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skeleton-kv-label {
+  height: 14px;
+  width: 60%;
+  border-radius: 4px;
+}
+
+.skeleton-kv-value {
+  height: 20px;
+  width: 80%;
+  border-radius: 4px;
+}

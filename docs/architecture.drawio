@@ -1,0 +1,196 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Page-1" id="-MjVMpq2enGU-C9R9rnd">
+    <mxGraphModel dx="1746" dy="1518" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="frontend_grp" parent="1" style="swimlane;startSize=30;fillColor=#e8f4f8;strokeColor=#147EB4;rounded=1;html=1;fontSize=14;fontStyle=1;" value="Frontend" vertex="1">
+          <mxGeometry height="180" width="180" y="240" as="geometry" />
+        </mxCell>
+        <mxCell id="spa" parent="frontend_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.client;fillColor=#232F3E;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="React SPA&lt;br&gt;Cloudscape" vertex="1">
+          <mxGeometry height="80" width="80" x="50" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="cf" parent="1" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudfront;fillColor=#8C4FFF;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Amazon CloudFront" vertex="1">
+          <mxGeometry height="80" width="80" x="300" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="s3web" parent="1" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;fillColor=#3F8624;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Amazon S3&lt;br&gt;(Website)" vertex="1">
+          <mxGeometry height="80" width="80" x="520" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="apigw" parent="1" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.api_gateway;fillColor=#E7157B;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Amazon API Gateway" vertex="1">
+          <mxGeometry height="80" width="80" x="300" y="290" as="geometry" />
+        </mxCell>
+        <mxCell id="cognito" parent="1" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cognito;fillColor=#DD344C;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Amazon Cognito&lt;br&gt;(Authorizer)" vertex="1">
+          <mxGeometry height="80" width="80" x="300" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="backend" parent="1" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;fillColor=#ED7100;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="AWS Lambda&lt;br&gt;(Backend API)" vertex="1">
+          <mxGeometry height="80" width="80" x="540" y="290" as="geometry" />
+        </mxCell>
+        <mxCell id="ddb" parent="1" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.dynamodb;fillColor=#C925D1;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Amazon DynamoDB&lt;br&gt;(AnalyticsTable)" vertex="1">
+          <mxGeometry height="80" width="80" x="780" y="290" as="geometry" />
+        </mxCell>
+        <mxCell id="s3data" parent="1" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;fillColor=#3F8624;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Amazon S3&lt;br&gt;(Data Bucket)" vertex="1">
+          <mxGeometry height="80" width="80" x="780" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="ssm" parent="1" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.systems_manager_parameter_store;fillColor=#E7157B;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="AWS Systems Manager&lt;br&gt;Parameter Store" vertex="1">
+          <mxGeometry height="80" width="80" x="780" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="idc" parent="1" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.identity_and_access_management;fillColor=#DD344C;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="AWS IAM&lt;br&gt;Identity Center" vertex="1">
+          <mxGeometry height="80" width="80" x="960" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="agent_grp" parent="1" style="swimlane;startSize=30;fillColor=#e8f5e9;strokeColor=#82b366;rounded=1;html=1;fontSize=14;fontStyle=1;" value="Git-Kiro Correlation Agent" vertex="1">
+          <mxGeometry height="420" width="580" x="1080" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="agentcore" parent="agent_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sagemaker;fillColor=#01A88D;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Amazon Bedrock&lt;br&gt;AgentCore" vertex="1">
+          <mxGeometry height="80" width="80" x="40" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="claude_sonnet" parent="agent_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sagemaker;fillColor=#01A88D;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Claude Sonnet 4.6&lt;br&gt;(Amazon Bedrock)" vertex="1">
+          <mxGeometry height="80" width="80" x="250" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="github_tool" parent="agent_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.api_gateway;fillColor=#E7157B;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="GitHub Tool&lt;br&gt;(via API Gateway)" vertex="1">
+          <mxGeometry height="80" width="80" x="250" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="kiro_data_tool" parent="agent_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;fillColor=#ED7100;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Kiro Data Tool&lt;br&gt;(AWS Lambda)" vertex="1">
+          <mxGeometry height="80" width="80" x="250" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="github_api" parent="agent_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.client;fillColor=#232F3E;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="GitHub API" vertex="1">
+          <mxGeometry height="80" width="80" x="460" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" edge="1" parent="agent_grp" source="agentcore" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="claude_sonnet">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" edge="1" parent="agent_grp" source="agentcore" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="github_tool">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" edge="1" parent="agent_grp" source="agentcore" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="kiro_data_tool">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" edge="1" parent="agent_grp" source="github_tool" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="github_api">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="etl_grp" parent="1" style="swimlane;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;rounded=1;html=1;fontSize=14;fontStyle=1;" value="ETL Pipeline" vertex="1">
+          <mxGeometry height="440" width="1300" x="180" y="720" as="geometry" />
+        </mxCell>
+        <mxCell id="eb" parent="etl_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.eventbridge;fillColor=#E7157B;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Amazon EventBridge&lt;br&gt;Scheduler" vertex="1">
+          <mxGeometry height="80" width="80" x="30" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="sfn" parent="etl_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.step_functions;fillColor=#E7157B;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="AWS Step Functions&lt;br&gt;(Standard)" vertex="1">
+          <mxGeometry height="80" width="80" x="230" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="listfiles" parent="etl_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;fillColor=#ED7100;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="ListFiles&lt;br&gt;(AWS Lambda)" vertex="1">
+          <mxGeometry height="70" width="70" x="440" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="dmap" parent="etl_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.step_functions;fillColor=#E7157B;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Distributed Map&lt;br&gt;(Express)" vertex="1">
+          <mxGeometry height="70" width="70" x="440" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="parse" parent="etl_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;fillColor=#ED7100;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Parse&lt;br&gt;(AWS Lambda)" vertex="1">
+          <mxGeometry height="70" width="70" x="630" y="130" as="geometry" />
+        </mxCell>
+        <mxCell id="writer" parent="etl_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;fillColor=#ED7100;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Writer&lt;br&gt;(AWS Lambda)" vertex="1">
+          <mxGeometry height="70" width="70" x="630" y="270" as="geometry" />
+        </mxCell>
+        <mxCell id="recordstatus" parent="etl_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;fillColor=#ED7100;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="RecordStatus&lt;br&gt;(AWS Lambda)" vertex="1">
+          <mxGeometry height="70" width="70" x="440" y="330" as="geometry" />
+        </mxCell>
+        <mxCell id="catmap" parent="etl_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.step_functions;fillColor=#E7157B;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Categorization Map&lt;br&gt;(Standard)" vertex="1">
+          <mxGeometry height="70" width="70" x="830" y="270" as="geometry" />
+        </mxCell>
+        <mxCell id="listuncat" parent="etl_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;fillColor=#ED7100;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="ListUncategorized&lt;br&gt;(AWS Lambda)" vertex="1">
+          <mxGeometry height="70" width="70" x="1020" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="categorize" parent="etl_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;fillColor=#ED7100;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="CategorizePrompt&lt;br&gt;(AWS Lambda)" vertex="1">
+          <mxGeometry height="70" width="70" x="1020" y="330" as="geometry" />
+        </mxCell>
+        <mxCell id="bedrock_haiku" parent="etl_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sagemaker;fillColor=#01A88D;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Amazon Bedrock&lt;br&gt;Claude Haiku 4.5" vertex="1">
+          <mxGeometry height="70" width="70" x="1190" y="330" as="geometry" />
+        </mxCell>
+        <mxCell id="e16" edge="1" parent="etl_grp" source="eb" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="sfn" value="daily trigger">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e17" edge="1" parent="etl_grp" source="sfn" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="listfiles">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e18" edge="1" parent="etl_grp" source="sfn" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="dmap">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e19" edge="1" parent="etl_grp" source="dmap" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="parse">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e20" edge="1" parent="etl_grp" source="dmap" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="writer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e21" edge="1" parent="etl_grp" source="sfn" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="recordstatus">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e22" edge="1" parent="etl_grp" source="sfn" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="catmap">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e23" edge="1" parent="etl_grp" source="catmap" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="listuncat">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e24" edge="1" parent="etl_grp" source="catmap" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="categorize">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e25" edge="1" parent="etl_grp" source="categorize" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="bedrock_haiku">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="s3source" parent="1" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;fillColor=#3F8624;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Amazon S3&lt;br&gt;(Source Bucket)" vertex="1">
+          <mxGeometry height="80" width="80" x="1580" y="800" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="spa" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="cf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="spa" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="apigw">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="cf" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="s3web">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="apigw" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=1;dashed=1;html=1;" target="cognito" value="auth">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="apigw" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="backend">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="ddb">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="s3data">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=1;dashed=1;html=1;" target="ssm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=1;dashed=1;html=1;" target="idc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="agentcore" value="invoke">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" edge="1" parent="1" source="kiro_data_tool" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=1;dashed=1;html=1;" target="ddb">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e26" edge="1" parent="1" source="listfiles" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="s3source">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e27" edge="1" parent="1" source="parse" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=1;dashed=1;html=1;" target="s3source">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e28" edge="1" parent="1" source="writer" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="ddb">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e29" edge="1" parent="1" source="writer" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=1;dashed=1;html=1;" target="s3data">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e30" edge="1" parent="1" source="listuncat" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=1;dashed=1;html=1;" target="ddb">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e31" edge="1" parent="1" source="categorize" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=1;dashed=1;html=1;" target="ddb">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e32" edge="1" parent="1" source="recordstatus" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=1;dashed=1;html=1;" target="ssm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

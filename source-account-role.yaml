@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Kiro Cost Analyzer — IAM Role cross-account para acesso de leitura ao bucket S3 de origem.
+  Deploy este template na conta onde reside o bucket S3.
+
+Parameters:
+  KiroAccountId:
+    Type: String
+    Description: ID da conta AWS onde o Kiro Cost Analyzer está deployado
+    AllowedPattern: "\\d{12}"
+    ConstraintDescription: Deve ser um ID de conta AWS válido (12 dígitos)
+
+  SourceBucketName:
+    Type: String
+    Description: Nome do bucket S3 de origem com os CSVs e logs de prompt
+
+  KMSKeyArn:
+    Type: String
+    Default: ""
+    Description: ARN da chave KMS CMK usada para criptografar o bucket (vazio se SSE-S3)
+
+Conditions:
+  HasKMSKey: !Not [!Equals [!Ref KMSKeyArn, ""]]
+
+Resources:
+  CrossAccountRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: kiro-cost-analyzer-cross-account-read
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${KiroAccountId}:root"
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:PrincipalAccount: !Ref KiroAccountId
+
+  S3ReadPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: kiro-s3-read-access
+      Roles:
+        - !Ref CrossAccountRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ListSourceBucket
+            Effect: Allow
+            Action:
+              - s3:ListBucket
+            Resource:
+              - !Sub "arn:aws:s3:::${SourceBucketName}"
+          - Sid: ReadSourceObjects
+            Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource:
+              - !Sub "arn:aws:s3:::${SourceBucketName}/*"
+
+  KMSDecryptPolicy:
+    Type: AWS::IAM::Policy
+    Condition: HasKMSKey
+    Properties:
+      PolicyName: kiro-kms-decrypt-access
+      Roles:
+        - !Ref CrossAccountRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DecryptSourceObjects
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource:
+              - !Ref KMSKeyArn
+
+Outputs:
+  CrossAccountRoleArn:
+    Description: ARN da IAM Role cross-account — use este valor no parâmetro SourceBucketRoleArn do stack principal
+    Value: !GetAtt CrossAccountRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-CrossAccountRoleArn"

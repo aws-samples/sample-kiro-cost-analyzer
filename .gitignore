@@ -1,0 +1,70 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Build artifacts
+.aws-sam/
+frontend/dist/
+frontend/dist-ssr/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# SAM
+samconfig.toml
+
+# Test / Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temp
+/tmp/
+kiro-cost-analyzer.zip
+
+# Unused Vite template assets
+frontend/src/assets/
+frontend/public/icons.svg
+.hypothesis/
+
+# Threat model output
+.threatmodel/
+
+#repolinter
+.repolinter/
+
+# AgentCore build artifacts
+.bedrock_agentcore/
+
+# AgentCore local config (contains account-specific data)
+.bedrock_agentcore.yaml
+
+# Claude Code
+.claude/
+CLAUDE.md
+.tmp-issues/
+
+# draw.io editor backups
+*.drawio.bkp
+.$*.drawio.bkp

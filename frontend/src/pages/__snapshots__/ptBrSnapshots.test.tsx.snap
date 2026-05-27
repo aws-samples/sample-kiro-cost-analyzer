@@ -1,0 +1,71 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`pt-BR snapshot regression > ForgotPasswordPage renders translated pt-BR text 1`] = `
+"Esqueci minha senha
+Informe seu email para receber um código de verificação.
+Email
+Voltar para login
+Enviar código"
+`;
+
+exports[`pt-BR snapshot regression > LoginPage renders translated pt-BR text 1`] = `
+"Kiro Cost Analyzer
+Monitoramento de custos e uso de IA
+Entrar
+Email
+Senha
+Esqueci minha senha
+Entrar"
+`;
+
+exports[`pt-BR snapshot regression > NewPasswordPage renders translated pt-BR text 1`] = `
+"Definir nova senha
+Primeiro acesso de admin@example.com. Defina uma nova senha.
+Nova senha
+Confirmar nova senha
+Definir senha"
+`;
+
+exports[`pt-BR snapshot regression > ResetPasswordPage renders translated pt-BR text 1`] = `
+"Redefinir senha
+Email
+Código de verificação
+Nova senha
+Confirmar nova senha
+Voltar para login
+Redefinir senha"
+`;
+
+exports[`pt-BR snapshot regression > SettingsPage renders translated pt-BR text 1`] = `
+"ETL
+Fontes de Dados
+Identity Center
+Engajamento
+Preços dos Planos
+Prompts
+Status do ETL
+Executar ETL
+Nenhuma execução registrada. Dispare o ETL manualmente ou aguarde a execução agendada."
+`;
+
+exports[`pt-BR snapshot regression > SignupPage renders translated pt-BR text 1`] = `
+"Criar conta
+Email
+Senha
+Confirmar senha
+Voltar para login
+Cadastrar"
+`;
+
+exports[`pt-BR snapshot regression > UsersPage renders translated pt-BR text 1`] = `
+"Usuários Cadastrados
+(0)
+Adicionar Usuário
+Email
+Usuário Kiro
+Papel
+Status
+Criado em
+Ações
+Nenhum usuário cadastrado."
+`;

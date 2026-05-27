@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Clear Mind — Resumo Diário",
+  "description": "Mostra automaticamente o resumo de projetos, tarefas e emails pendentes quando você envia uma mensagem ao agente. Funciona como um lembrete diário do que precisa de atenção.",
+  "version": "1",
+  "when": {
+    "type": "promptSubmit"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Leia o arquivo ~/.kiro/clear-mind-db.json e mostre um resumo rápido APENAS se o usuário mencionou #clear-mind ou pediu resumo/status. O resumo deve incluir: 1) Projetos que precisam de check diário (check_frequency=daily), 2) Tarefas com prazo próximo (≤7 dias), 3) Emails pendentes de resposta. Use emojis de status. Seja breve."
+  }
+}

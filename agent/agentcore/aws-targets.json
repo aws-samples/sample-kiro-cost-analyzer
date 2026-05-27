@@ -1,0 +1,8 @@
+{
+  "targets": [
+    {
+      "accountId": "${AWS_ACCOUNT_ID}",
+      "region": "sa-east-1"
+    }
+  ]
+}

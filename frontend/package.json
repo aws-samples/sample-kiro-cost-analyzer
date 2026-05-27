@@ -1,0 +1,53 @@
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "check:locales": "node --experimental-strip-types ../scripts/check-locales.ts",
+    "report:i18n-sizes": "node ../scripts/report-i18n-sizes.js",
+    "build": "npm run check:locales && tsc -b && vite build && npm run report:i18n-sizes",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "test": "NODE_OPTIONS=--no-webstorage vitest --run"
+  },
+  "dependencies": {
+    "@cloudscape-design/components": "^3.0.1270",
+    "@cloudscape-design/design-tokens": "^3.0.78",
+    "@cloudscape-design/global-styles": "^1.0.57",
+    "amazon-cognito-identity-js": "^6.3.16",
+    "i18next": "26.0.8",
+    "i18next-resources-to-backend": "1.2.1",
+    "d3-scale": "^4.0.2",
+    "d3-selection": "^3.0.0",
+    "d3-shape": "^3.2.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-i18next": "17.0.4",
+    "react-router-dom": "^7.14.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/d3-scale": "^4.0.8",
+    "@types/d3-selection": "^3.0.11",
+    "@types/d3-shape": "^3.1.7",
+    "@types/node": "^24.12.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "fast-check": "^4.6.0",
+    "globals": "^17.4.0",
+    "jsdom": "^29.0.2",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.58.0",
+    "vite": "^8.0.4",
+    "vitest": "^4.1.4"
+  }
+}

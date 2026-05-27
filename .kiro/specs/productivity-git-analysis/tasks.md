@@ -1,0 +1,295 @@
+# Plano de Implementação: Análise de Produtividade com Git
+
+## Visão Geral
+
+Este plano implementa a integração Git no Kiro Cost Analyzer de forma incremental: fundação (modelos, exceções, conector base) → conectores por provedor → handlers backend → pipeline de sincronização → motor de correlação → infraestrutura SAM → frontend → testes. Cada fase termina com um checkpoint de validação.
+
+## Tarefas
+
+- [x] 1. Fundação — Modelos de dados, exceções e conector base
+  - [x] 1.1 Criar exceções de domínio do Git Connector
+    - Criar `backend/git_connector/__init__.py` e `backend/git_connector/exceptions.py`
+    - Implementar hierarquia: `GitConnectorError` (base), `GitAuthError`, `GitRateLimitError`, `GitConnectionError`, `GitRepoNotFoundError`
+    - _Requisitos: 1.7, 1.8, 3.5, 3.7_
+  - [x] 1.2 Criar classe base abstrata `GitConnector`
+    - Criar `backend/git_connector/base.py` com ABC
+    - Métodos abstratos: `validate_connection()`, `get_commits()`, `get_pull_requests()`, `get_reviews()`
+    - Implementar método `_request_with_retry()` com backoff exponencial + jitter na classe base
+    - _Requisitos: 1.3, 1.7, 3.7_
+  - [x] 1.3 Criar factory de conectores Git
+    - Criar `backend/git_connector/factory.py` com `create_connector(provider, access_token)`
+    - Mapear provedores suportados: `github`, `gitlab`, `bitbucket`, `codecommit`
+    - Lançar `ValueError` para provedores não suportados
+    - _Requisitos: 1.3_
+  - [x] 1.4 Estender o repositório DynamoDB para operações Git
+    - Criar `backend/repository/git_repository.py` com classe `GitRepository`
+    - Implementar métodos CRUD para repositórios (`GITREPO#{repoId}/CONFIG`), mapeamentos (`USER#{userId}/GITMAP#`), atividades Git (`GITCOMMIT#`, `GITPR#`, `GITREVIEW#`) e stats de sync (`SYNC#`)
+    - Seguir padrão de injeção de dependência do `AnalyticsRepository` existente
+    - Incluir `_convert_decimals()` e helpers de paginação
+    - _Requisitos: 1.1, 2.1, 3.2, 3.3, 3.4_
+  - [x] 1.5 Adicionar interfaces TypeScript para Git
+    - Adicionar em `frontend/src/types/index.ts` as interfaces: `GitRepository`, `GitUserMapping`, `GitActivitySummary`, `GitTimelineEntry`, `GitPullRequest`, `GitActivityResponse`, `CorrelationMetrics`, `ComparativeTimelineEntry`, `CorrelationResponse`
+    - _Requisitos: 6.1, 6.2, 6.3, 6.4_
+
+- [x] 2. Checkpoint — Validar fundação
+  - Garantir que todos os testes passam, perguntar ao usuário se há dúvidas.
+
+- [x] 3. Implementar conectores Git por provedor
+  - [x] 3.1 Implementar `GitHubConnector`
+    - Criar `backend/git_connector/github_connector.py`
+    - Usar GitHub REST API v3 (`api.github.com`)
+    - Implementar `validate_connection()`, `get_commits()`, `get_pull_requests()`, `get_reviews()`
+    - Converter respostas JSON para formato normalizado do sistema
+    - Tratar erros HTTP 401/403 como `GitAuthError`, 429 como `GitRateLimitError`
+    - _Requisitos: 1.3, 1.7, 1.8, 3.1, 8.3, 8.5_
+  - [x] 3.2 Implementar `GitLabConnector`
+    - Criar `backend/git_connector/gitlab_connector.py`
+    - Usar GitLab REST API v4 (`gitlab.com/api/v4`)
+    - Mesma interface e tratamento de erros do GitHubConnector
+    - _Requisitos: 1.3, 1.7, 1.8, 3.1, 8.3_
+  - [x] 3.3 Implementar `BitbucketConnector`
+    - Criar `backend/git_connector/bitbucket_connector.py`
+    - Usar Bitbucket REST API 2.0 (`api.bitbucket.org/2.0`)
+    - Mesma interface e tratamento de erros
+    - _Requisitos: 1.3, 1.7, 1.8, 3.1, 8.3_
+  - [x] 3.4 Implementar `CodeCommitConnector`
+    - Criar `backend/git_connector/codecommit_connector.py`
+    - Usar boto3 `codecommit` client (sem HTTP direto)
+    - Aceitar `access_token` como parâmetro mas usar credenciais IAM da Lambda
+    - _Requisitos: 1.3, 1.7, 3.1_
+  - [x] 3.5 Registrar todos os conectores na factory
+    - Atualizar `factory.py` com imports dos 4 conectores
+    - _Requisitos: 1.3_
+
+- [x] 4. Checkpoint — Validar conectores Git
+  - Garantir que todos os testes passam, perguntar ao usuário se há dúvidas.
+
+- [x] 5. Implementar handlers backend — CRUD de repositórios e mapeamentos
+  - [x] 5.1 Implementar `git_repo_handler.py`
+    - Criar `backend/handlers/git_repo_handler.py`
+    - Implementar `handle_create_repo(body, claims)`: validar URL e provedor, armazenar token no SSM SecureString, validar conectividade via `GitConnector.validate_connection()`, persistir no DynamoDB
+    - Implementar `handle_list_repos()`: retornar repositórios sem expor tokens (apenas `tokenConfigured: true/false`)
+    - Implementar `handle_delete_repo(repo_id)`: remover do DynamoDB e deletar parâmetro SSM
+    - Implementar `handle_manual_sync(repo_id)`: verificar rate limit (5 min), iniciar Step Functions execution
+    - Usar `StructuredLogger` para auditoria de todas as operações
+    - _Requisitos: 1.1, 1.2, 1.4, 1.5, 1.6, 1.7, 1.8, 3.8, 8.1, 8.2, 8.6_
+  - [ ]* 5.2 Escrever testes property-based para segurança de tokens
+    - **Propriedade 1: Tokens Git nunca são expostos no DynamoDB nem nas respostas da API**
+    - **Valida: Requisitos 1.4, 1.5, 8.1**
+  - [ ]* 5.3 Escrever testes property-based para validação de entrada
+    - **Propriedade 2: Validação de entrada rejeita URLs inválidas e provedores não suportados**
+    - **Valida: Requisitos 1.2**
+  - [x] 5.4 Implementar `git_mapping_handler.py`
+    - Criar `backend/handlers/git_mapping_handler.py`
+    - Implementar `handle_create_mapping(body, claims)`: validar que userId existe no sistema, persistir mapeamento no DynamoDB
+    - Implementar `handle_list_mappings(user_id)`: retornar todos os mapeamentos do usuário
+    - Implementar `handle_delete_mapping(user_id, provider, git_username)`: remover mapeamento
+    - Usar `StructuredLogger` para auditoria
+    - _Requisitos: 2.1, 2.2, 2.3, 2.4, 2.5, 8.2_
+  - [ ]* 5.5 Escrever testes property-based para mapeamentos múltiplos
+    - **Propriedade 3: Mapeamentos múltiplos por usuário são armazenados e recuperados integralmente**
+    - **Valida: Requisitos 2.1, 2.3, 2.4**
+  - [ ]* 5.6 Escrever testes property-based para userId inexistente
+    - **Propriedade 4: Mapeamento com userId inexistente retorna 404**
+    - **Valida: Requisitos 2.2**
+
+- [x] 6. Integrar novos handlers ao roteador
+  - [x] 6.1 Atualizar `backend/handler.py` com rotas Git
+    - Adicionar imports dos novos handlers (`git_repo_handler`, `git_mapping_handler`, `git_activity_handler`, `correlation_handler`) com try/except fallback
+    - Adicionar padrões regex para rotas com path parameters: `/api/git/repos/{repoId}`, `/api/git/repos/{repoId}/sync`, `/api/git/mappings/{userId}`, `/api/git/mappings/{userId}/{provider}/{gitUsername}`, `/api/git/activity/{userId}`, `/api/git/correlation/{userId}`
+    - Implementar roteamento na função `_route()` com verificação `_is_admin()` para endpoints de configuração (repos e mappings)
+    - Endpoints de leitura (activity, correlation) acessíveis a qualquer usuário autenticado
+    - _Requisitos: 8.4_
+  - [ ]* 6.2 Escrever testes property-based para autorização Admin
+    - **Propriedade 13: Endpoints de configuração Git exigem grupo Admins**
+    - **Valida: Requisitos 8.4**
+
+- [x] 7. Checkpoint — Validar handlers backend e roteamento
+  - Garantir que todos os testes passam, perguntar ao usuário se há dúvidas.
+
+- [x] 8. Implementar pipeline de sincronização Git
+  - [x] 8.1 Criar `git_sync_handler.py` (Lambda entry point)
+    - Criar `etl/git_sync_handler.py` com `lambda_handler(event, context)`
+    - Implementar ação `list_repos`: consultar DynamoDB por repositórios ativos, retornar lista com count
+    - Implementar ação `sync_repo`: para um repoId, buscar token do SSM, criar conector via factory, coletar commits/PRs/reviews desde `lastSyncAt`, resolver userId via mapeamentos, persistir no DynamoDB com BatchWrite, atualizar status do repo
+    - Tratar erros de autenticação: logar sem expor token, marcar repo como `SYNC_ERROR`, continuar
+    - Usar `StructuredLogger` para todas as operações
+    - _Requisitos: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 2.6, 8.5_
+  - [ ]* 8.2 Escrever testes property-based para resolução de mapeamentos na sync
+    - **Propriedade 5: Sincronização resolve corretamente o userId Kiro via mapeamentos**
+    - **Valida: Requisitos 2.6**
+  - [ ]* 8.3 Escrever testes property-based para padrão de chaves DynamoDB
+    - **Propriedade 6: Atividades Git são armazenadas com padrão de chave correto e campos completos**
+    - **Valida: Requisitos 3.2, 3.3, 3.4**
+  - [ ]* 8.4 Escrever testes property-based para não-exposição de tokens em logs
+    - **Propriedade 14: Logs de erro de autenticação Git nunca expõem o Access_Token**
+    - **Valida: Requisitos 8.5**
+
+- [x] 9. Checkpoint — Validar pipeline de sincronização
+  - Garantir que todos os testes passam, perguntar ao usuário se há dúvidas.
+
+- [x] 10. Implementar consulta de atividades e motor de correlação
+  - [x] 10.1 Implementar `git_activity_handler.py`
+    - Criar `backend/handlers/git_activity_handler.py`
+    - Implementar `handle_git_activity(user_id, query_params)`: consultar commits, PRs e reviews do DynamoDB com filtro de período, calcular métricas agregadas (totalCommits, totalPRsOpened, totalPRsMerged, totalReviews, avgLinesPerCommit, avgMergeTimeHours), construir timeline diária, listar PRs recentes
+    - Retornar `hasMapping: false` com mensagem quando não houver mapeamento
+    - _Requisitos: 4.1, 4.2, 4.3, 4.4, 4.5_
+  - [ ]* 10.2 Escrever testes property-based para filtro de período
+    - **Propriedade 7: Consulta de atividades Git respeita filtro de período**
+    - **Valida: Requisitos 4.1**
+  - [ ]* 10.3 Escrever testes property-based para métricas agregadas
+    - **Propriedade 8: Métricas agregadas de atividades Git são matematicamente corretas**
+    - **Valida: Requisitos 4.2, 5.2**
+  - [ ]* 10.4 Escrever testes property-based para timeline diária
+    - **Propriedade 9: Timeline diária de atividades Git é ordenada e tem contagens corretas**
+    - **Valida: Requisitos 4.3**
+  - [x] 10.5 Implementar `correlation_engine.py`
+    - Criar `backend/correlation_engine.py` como módulo de funções puras (sem I/O)
+    - Implementar `compute_impact_index(kiro_daily, git_daily)`: alinhar timelines por data (inner join), calcular Pearson entre prompts Kiro e atividades Git, normalizar para 0-100 (`round((r+1)/2*100)`), classificar em faixas (Baixo/Moderado/Alto/Muito Alto)
+    - Implementar métricas derivadas: `prompts_per_commit`, `merge_rate`, `avg_review_time_hours`, `relative_productivity`
+    - Retornar `sufficientData=false` com mensagem quando < 3 dias sobrepostos
+    - _Requisitos: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6_
+  - [ ]* 10.6 Escrever testes property-based para cálculo do Índice de Impacto
+    - **Propriedade 10: Índice de Impacto é calculado corretamente a partir da correlação de Pearson**
+    - **Valida: Requisitos 5.1**
+  - [ ]* 10.7 Escrever testes property-based para classificação do Índice
+    - **Propriedade 11: Classificação do Índice de Impacto respeita as faixas definidas**
+    - **Valida: Requisitos 5.4**
+  - [ ]* 10.8 Escrever testes property-based para dados insuficientes
+    - **Propriedade 12: Dados insuficientes resultam em Índice de Impacto nulo**
+    - **Valida: Requisitos 5.5**
+  - [x] 10.9 Implementar `correlation_handler.py`
+    - Criar `backend/handlers/correlation_handler.py`
+    - Implementar `handle_correlation(user_id, query_params)`: buscar dados Kiro (daily stats) e Git (commits, PRs) do DynamoDB, chamar `compute_impact_index()`, construir timeline comparativa, retornar resposta formatada
+    - _Requisitos: 5.1, 5.2, 5.3, 5.4, 5.5_
+
+- [x] 11. Checkpoint — Validar atividades e correlação
+  - Garantir que todos os testes passam, perguntar ao usuário se há dúvidas.
+
+- [x] 12. Infraestrutura — Atualizar template SAM
+  - [x] 12.1 Adicionar `RequestsLayer` ao template
+    - Criar Lambda Layer com biblioteca `requests` para uso pelo `GitSyncFunction`
+    - Adicionar recurso `RequestsLayer` do tipo `AWS::Serverless::LayerVersion`
+    - _Requisitos: 3.1_
+  - [x] 12.2 Adicionar `GitSyncFunction` ao template
+    - Definir Lambda com handler `git_sync_handler.lambda_handler`, CodeUri `etl/`, MemorySize 512, Timeout 300
+    - Configurar variáveis de ambiente: `ANALYTICS_TABLE`
+    - Adicionar policies: DynamoDB (Query, PutItem, UpdateItem, BatchWriteItem), SSM GetParameter para tokens, KMS Decrypt, CodeCommit read
+    - Referenciar `RequestsLayer`
+    - _Requisitos: 3.1, 3.2, 3.3, 3.4, 8.1_
+  - [x] 12.3 Adicionar `GitSyncStateMachine` ao template
+    - Definir Step Functions Standard com schedule `cron(30 0 * * ? *)` (00:30 UTC diário)
+    - Implementar estados: `ListRepositories` → `CheckRepos` → `SyncRepositories` (Map, MaxConcurrency 5) → `Done`
+    - Configurar retry para `RateLimitError` com backoff exponencial
+    - Configurar catch para erros com estado `MarkSyncError`
+    - Adicionar policies para invocar `GitSyncFunction`
+    - _Requisitos: 3.1, 3.7, 3.8_
+  - [x] 12.4 Adicionar novos eventos API ao `BackendFunction`
+    - Adicionar 9 eventos: `GitReposPost`, `GitReposGet`, `GitReposDelete`, `GitRepoSync`, `GitMappingsPost`, `GitMappingsGet`, `GitMappingsDelete`, `GitActivityGet`, `GitCorrelationGet`
+    - _Requisitos: 1.1, 2.1, 4.1, 5.1_
+  - [x] 12.5 Adicionar novas IAM policies ao `BackendFunction`
+    - SSM: GetParameter, PutParameter, DeleteParameter para `/kiro-cost-analyzer/git-tokens/*`
+    - KMS: Encrypt, Decrypt
+    - DynamoDB: PutItem, DeleteItem, UpdateItem na AnalyticsTable
+    - Step Functions: StartExecution no `GitSyncStateMachine`
+    - _Requisitos: 1.4, 1.6, 3.8, 8.1_
+  - [x] 12.6 Adicionar variável de ambiente `GIT_SYNC_STATE_MACHINE_ARN` ao `BackendFunction`
+    - Referenciar `!Ref GitSyncStateMachine` nas variáveis de ambiente
+    - _Requisitos: 3.8_
+
+- [x] 13. Checkpoint — Validar infraestrutura
+  - Garantir que `sam validate` passa sem erros, perguntar ao usuário se há dúvidas.
+
+- [x] 14. Frontend — Componentes e páginas Git
+  - [x] 14.1 Criar funções de API client para endpoints Git
+    - Adicionar em `frontend/src/api/client.ts` ou criar `frontend/src/api/gitApi.ts` com funções: `createGitRepo()`, `listGitRepos()`, `deleteGitRepo()`, `triggerGitSync()`, `createGitMapping()`, `listGitMappings()`, `deleteGitMapping()`, `getGitActivity()`, `getGitCorrelation()`
+    - Usar o cliente HTTP existente (`get`, `post`, `del`)
+    - _Requisitos: 1.1, 2.1, 4.1, 5.1_
+  - [x] 14.2 Criar componente `GitSummaryCards.tsx`
+    - Cards com total commits, PRs merged, reviews, avg lines/commit usando Cloudscape `ColumnLayout` + `Box`
+    - Props: `summary: GitActivitySummary`, `loading: boolean`
+    - _Requisitos: 6.1_
+  - [x] 14.3 Criar componente `ComparativeTimelineChart.tsx`
+    - LineChart com duas séries (Kiro prompts + Git activities) no mesmo eixo temporal
+    - Usar Cloudscape `LineChart` ou `MixedLineBarChart`
+    - Props: `timeline: ComparativeTimelineEntry[]`, `loading: boolean`
+    - _Requisitos: 6.2_
+  - [x] 14.4 Criar componente `ImpactIndexIndicator.tsx`
+    - ProgressBar + Badge com faixa (Baixo/Moderado/Alto/Muito Alto) e cores correspondentes
+    - Usar Cloudscape `ProgressBar`, `Badge`, `Box`
+    - Props: `impactIndex: number | null`, `impactLevel: string | null`, `sufficientData: boolean`
+    - _Requisitos: 6.3_
+  - [x] 14.5 Criar componente `GitPullRequestsTable.tsx`
+    - Table com PRs recentes: título, repositório, estado, data criação, data merge, commits
+    - Usar Cloudscape `Table` com colunas tipadas
+    - Props: `pullRequests: GitPullRequest[]`, `loading: boolean`
+    - _Requisitos: 6.4_
+  - [x] 14.6 Criar componente `GitRepoForm.tsx`
+    - Modal form para adicionar repositório: nome, URL, provedor (Select), token (Input type password)
+    - Validação client-side de URL e campos obrigatórios
+    - Estado de loading durante validação de conectividade
+    - Usar Cloudscape `Modal`, `FormField`, `Input`, `Select`, `Button`
+    - _Requisitos: 7.2, 7.3_
+  - [x] 14.7 Criar componente `GitMappingForm.tsx`
+    - Form inline para adicionar mapeamento: userId (Select com usuários), provedor (Select), gitUsername (Input)
+    - Validação que userId existe no sistema
+    - Usar Cloudscape `FormField`, `Select`, `Input`, `Button`
+    - _Requisitos: 7.4, 7.5_
+  - [x] 14.8 Criar página `GitSettingsPage.tsx`
+    - Seção "Repositórios Git": tabela com lista de repos + botão adicionar (abre GitRepoForm) + ações (deletar, sincronizar)
+    - Seção "Mapeamentos de Usuários": tabela com mapeamentos + GitMappingForm inline
+    - Acesso restrito a Admins (verificar grupo no AuthProvider)
+    - Usar Cloudscape `ContentLayout`, `Header`, `Table`, `SpaceBetween`
+    - _Requisitos: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6_
+  - [x] 14.9 Estender `ProductivityPage.tsx` com seções Git
+    - Adicionar seção "Atividades Git" com `GitSummaryCards` + timeline
+    - Adicionar seção "Índice de Impacto" com `ImpactIndexIndicator` + métricas
+    - Adicionar seção "Pull Requests Recentes" com `GitPullRequestsTable`
+    - Adicionar `ComparativeTimelineChart` com timeline comparativa
+    - Exibir mensagem informativa com link para `/git-settings` quando não houver mapeamento
+    - Manter todas as funcionalidades existentes inalteradas
+    - _Requisitos: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7_
+  - [x] 14.10 Atualizar navegação e rotas em `App.tsx`
+    - Adicionar item "Repositórios Git" ao `NAV_ITEMS` com href `/git-settings`
+    - Adicionar `<Route path="/git-settings" element={<GitSettingsPage />} />`
+    - Importar `GitSettingsPage`
+    - _Requisitos: 7.1_
+
+- [x] 15. Checkpoint — Validar frontend
+  - Garantir que o build do frontend (`npm run build`) passa sem erros, perguntar ao usuário se há dúvidas.
+
+- [ ] 16. Testes de integração e validação final
+  - [ ]* 16.1 Escrever testes unitários para `git_repo_handler`
+    - Testar CRUD completo com moto (DynamoDB + SSM mockados)
+    - Testar validação de entrada, armazenamento SSM, listagem sem tokens
+    - _Requisitos: 1.1, 1.2, 1.4, 1.5, 1.6_
+  - [ ]* 16.2 Escrever testes unitários para `git_mapping_handler`
+    - Testar CRUD de mapeamentos, validação de userId, múltiplos mapeamentos
+    - _Requisitos: 2.1, 2.2, 2.3, 2.4, 2.5_
+  - [ ]* 16.3 Escrever testes unitários para `git_activity_handler`
+    - Testar consulta com filtros de data, agregação de métricas, timeline, caso sem mapeamento
+    - _Requisitos: 4.1, 4.2, 4.3, 4.4_
+  - [ ]* 16.4 Escrever testes unitários para `correlation_engine`
+    - Testar cálculo de Pearson com dados conhecidos, classificação de faixas, dados insuficientes
+    - _Requisitos: 5.1, 5.2, 5.4, 5.5_
+  - [ ]* 16.5 Escrever testes unitários para `git_sync_handler`
+    - Testar fluxo de sincronização com moto, resolução de mapeamentos, tratamento de erros
+    - _Requisitos: 3.1, 3.2, 3.5, 3.6_
+  - [ ]* 16.6 Escrever testes de integração do roteador
+    - Testar que `handler.py` roteia corretamente para todos os novos endpoints Git
+    - Testar autorização Admin em endpoints de configuração
+    - Testar que endpoints de leitura (activity, correlation) são acessíveis a qualquer usuário autenticado
+    - _Requisitos: 8.4_
+
+- [x] 17. Checkpoint final — Validação completa
+  - Garantir que todos os testes passam (`pytest` e `npm run build`), perguntar ao usuário se há dúvidas.
+
+## Notas
+
+- Tarefas marcadas com `*` são opcionais e podem ser puladas para um MVP mais rápido
+- Cada tarefa referencia requisitos específicos para rastreabilidade
+- Checkpoints garantem validação incremental entre fases
+- Testes property-based validam as 14 propriedades de corretude definidas no design
+- Testes unitários validam exemplos específicos e edge cases
+- O código Python segue o padrão try/except para imports, injeção de dependência e StructuredLogger
+- O frontend usa exclusivamente Cloudscape Design System

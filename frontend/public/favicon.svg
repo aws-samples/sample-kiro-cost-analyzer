@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Ghost body -->
+  <path d="M32 4C18.7 4 8 14.7 8 28v24c0 2 1 3 2.5 2 1.5-1 3-2 4.5-2s3 1 4.5 2 3 2 4.5 2 3-1 4.5-2 3-2 4.5-2 3 1 4.5 2 3 2 4.5 2 3-1 4.5-2 3-2 4.5-2 3 1 4.5 2c1.5 1 2.5 0 2.5-2V28C56 14.7 45.3 4 32 4z" fill="#c084fc"/>
+  <!-- Eyes -->
+  <circle cx="24" cy="26" r="4" fill="#1a1a2e"/>
+  <circle cx="40" cy="26" r="4" fill="#1a1a2e"/>
+  <circle cx="25" cy="25" r="1.5" fill="white"/>
+  <circle cx="41" cy="25" r="1.5" fill="white"/>
+  <!-- Dollar sign -->
+  <text x="32" y="46" text-anchor="middle" font-family="system-ui,sans-serif" font-size="16" font-weight="bold" fill="#1a1a2e">$</text>
+</svg>

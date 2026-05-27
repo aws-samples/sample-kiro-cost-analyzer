@@ -1,0 +1,54 @@
+{
+  "name": "GitCorrelationAgent",
+  "description": "AI Agent that correlates Kiro AI assistant usage with Git activity (commits/PRs) to produce semantic productivity analysis.",
+  "framework": "strands-agents",
+  "runtime": {
+    "language": "python",
+    "entrypoint": "../app/GitCorrelationAgent/main.py"
+  },
+  "model": {
+    "provider": "bedrock",
+    "modelId": "global.anthropic.claude-sonnet-4-6-v1",
+    "region": "sa-east-1"
+  },
+  "tools": [
+    {
+      "name": "GitHub_Tool",
+      "type": "gateway",
+      "description": "Access GitHub API for commits, PRs, and diffs",
+      "operations": [
+        "list_commits",
+        "list_pull_requests",
+        "get_commit_diff",
+        "get_pr_details"
+      ],
+      "auth": {
+        "type": "oauth",
+        "credentialName": "github-oauth-token"
+      }
+    },
+    {
+      "name": "Kiro_Data_Tool",
+      "type": "lambda",
+      "description": "Query Kiro usage data (prompts, daily stats, category distribution)",
+      "functionName": "kiro-consumption-KiroDataToolFunction",
+      "auth": {
+        "type": "iam"
+      }
+    }
+  ],
+  "credentials": [
+    {
+      "name": "github-oauth-token",
+      "type": "oauth",
+      "description": "GitHub OAuth token for API access",
+      "source": {
+        "type": "ssm",
+        "parameterPath": "/kiro-cost-analyzer/git-tokens/${userId}"
+      }
+    }
+  ],
+  "memory": {
+    "enabled": false
+  }
+}

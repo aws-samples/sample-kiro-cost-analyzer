@@ -1,0 +1,2121 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Kiro Cost Analyzer — AWS Serverless Application Model (AWS SAM) template for Kiro usage analytics (v2)
+
+Parameters:
+  StackName:
+    Type: String
+    Description: CloudFormation stack name
+  SourceBucketName:
+    Type: String
+    Description: S3 bucket name containing Kiro CSV activity logs
+  SourcePrefix:
+    Type: String
+    Description: "Base prefix up to KiroLogs/ (e.g., activities/AWSLogs/123456789012/KiroLogs/)"
+    Default: ""
+  AdminEmail:
+    Type: String
+    Description: Initial administrator email address
+  EtlScheduleExpression:
+    Type: String
+    Default: "cron(59 23 * * ? *)"
+    Description: ETL schedule expression
+  PromptsPrefix:
+    Type: String
+    Default: ""
+    Description: "Base prefix for prompt logs in the source bucket (e.g., prompts/AWSLogs/123456789012/KiroLogs/)"
+  IdentityStoreId:
+    Type: String
+    Default: ""
+    Description: "AWS IAM Identity Center Identity Store ID (e.g., d-94671e1709)"
+  SourceBucketRoleArn:
+    Type: String
+    Default: ""
+    Description: "IAM Role ARN in the source account for cross-account S3 access (empty = single-account)"
+  IdentityStoreRoleArn:
+    Type: String
+    Default: ""
+    Description: "IAM Role ARN in the IAM Identity Center account for cross-account Identity Store access (empty = single-account)"
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Architectures:
+      - x86_64
+    Tracing: Active
+
+Conditions:
+  HasSourceBucketRoleArn: !Not [!Equals [!Ref SourceBucketRoleArn, ""]]
+  HasIdentityStoreRoleArn: !Not [!Equals [!Ref IdentityStoreRoleArn, ""]]
+
+Resources:
+  # ============================================================
+  # Cognito
+  # ============================================================
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "${StackName}-user-pool"
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: true
+        - Name: kiro_user_id
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+          StringAttributeConstraints:
+            MaxLength: "128"
+            MinLength: "0"
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+  CognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub "${StackName}-spa-client"
+      UserPoolId: !Ref CognitoUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+      ReadAttributes:
+        - email
+        - custom:kiro_user_id
+      WriteAttributes:
+        - email
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 7
+      SupportedIdentityProviders:
+        - COGNITO
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      CallbackURLs:
+        - http://localhost:5173/callback
+        - !Sub "https://${CloudFrontDistribution.DomainName}/callback"
+      LogoutURLs:
+        - http://localhost:5173/
+        - !Sub "https://${CloudFrontDistribution.DomainName}/"
+
+  CognitoUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub "${StackName}-${AWS::AccountId}"
+      UserPoolId: !Ref CognitoUserPool
+
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Admins
+      Description: Administrator group with full access
+      UserPoolId: !Ref CognitoUserPool
+
+  AdminUserCreatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${StackName}-admin-user-creator"
+      Handler: admin_user_creator.lambda_handler
+      CodeUri: custom_resources/
+      Description: Custom Resource — creates initial admin user in Cognito
+      MemorySize: 128
+      Timeout: 60
+      Environment:
+        Variables:
+          USER_POOL_ID: !Ref CognitoUserPool
+      Policies:
+        - Statement:
+            - Sid: CognitoAdminUserCreation
+              Effect: Allow
+              Action:
+                - cognito-idp:AdminCreateUser
+                - cognito-idp:AdminAddUserToGroup
+                - cognito-idp:CreateGroup
+              Resource:
+                - !GetAtt CognitoUserPool.Arn
+
+  AdminUserCreation:
+    Type: Custom::AdminUser
+    DependsOn:
+      - AdminGroup
+    Properties:
+      ServiceToken: !GetAtt AdminUserCreatorFunction.Arn
+      UserPoolId: !Ref CognitoUserPool
+      AdminEmail: !Ref AdminEmail
+
+  # ============================================================
+  # S3 Buckets
+  # ============================================================
+  # Dedicated access logs bucket for the LoggingBucket itself.
+  # This breaks the circular dependency: LoggingBucket logs to this bucket,
+  # and this bucket does not log (it is the terminal sink).
+  S3AccessLogsBucket:
+    Type: AWS::S3::Bucket
+    Metadata:
+      guard:
+        SuppressedRules:
+          - S3_BUCKET_LOGGING_ENABLED  # Terminal logging sink — cannot log to itself without circular dependency
+          - S3_BUCKET_DEFAULT_LOCK_ENABLED  # Object Lock prevents lifecycle rotation; org CloudTrail provides tamper-proof records
+          - S3_BUCKET_NO_PUBLIC_RW_ACL  # False positive — BucketOwnerPreferred required for log delivery; all PublicAccessBlock settings enabled
+          - S3_BUCKET_SSL_REQUESTS_ONLY  # TLS enforced via separate S3AccessLogsBucketPolicy resource (DenyInsecureTransport); guard cannot correlate cross-resource policies
+      checkov:
+        skip:
+          - id: "CKV_AWS_18"
+            comment: "Terminal logging sink — cannot log to itself without circular dependency."
+    Properties:
+      BucketName: !Sub "${StackName}-s3-access-logs-${AWS::AccountId}"
+      ObjectLockEnabled: false
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireAccessLogs
+            Status: Enabled
+            ExpirationInDays: 90
+      VersioningConfiguration:
+        Status: Enabled
+
+  S3AccessLogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3AccessLogsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "arn:aws:s3:::${S3AccessLogsBucket}"
+              - !Sub "arn:aws:s3:::${S3AccessLogsBucket}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          - Sid: AllowS3LogDelivery
+            Effect: Allow
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::${S3AccessLogsBucket}/*"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref "AWS::AccountId"
+
+  # Amazon S3 bucket for access logs (DataBucket, WebsiteBucket).
+  # Now logs to S3AccessLogsBucket to satisfy access logging requirements.
+  LoggingBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: S3AccessLogsBucketPolicy
+    Metadata:
+      guard:
+        SuppressedRules:
+          - S3_BUCKET_DEFAULT_LOCK_ENABLED  # Object Lock prevents lifecycle rotation; org CloudTrail provides tamper-proof records
+          - S3_BUCKET_NO_PUBLIC_RW_ACL  # False positive — BucketOwnerPreferred required for log delivery; all PublicAccessBlock settings enabled
+          - S3_BUCKET_SSL_REQUESTS_ONLY  # TLS enforced via separate LoggingBucketPolicy resource (DenyInsecureTransport); guard cannot correlate cross-resource policies
+    Properties:
+      BucketName: !Sub "${StackName}-logs-${AWS::AccountId}"
+      ObjectLockEnabled: false
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireLogs
+            Status: Enabled
+            ExpirationInDays: 90
+      VersioningConfiguration:
+        Status: Enabled
+      LoggingConfiguration:
+        DestinationBucketName: !Ref S3AccessLogsBucket
+        LogFilePrefix: logging-bucket-logs/
+
+  LoggingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref LoggingBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "arn:aws:s3:::${LoggingBucket}"
+              - !Sub "arn:aws:s3:::${LoggingBucket}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          - Sid: AllowS3LogDelivery
+            Effect: Allow
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::${LoggingBucket}/*"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref "AWS::AccountId"
+
+  DataBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: LoggingBucketPolicy
+    Metadata:
+      guard:
+        SuppressedRules:
+          - S3_BUCKET_DEFAULT_LOCK_ENABLED  # Object Lock prevents lifecycle rotation; org CloudTrail provides tamper-proof records
+          - S3_BUCKET_NO_PUBLIC_RW_ACL  # False positive — BucketOwnerPreferred required for log delivery; all PublicAccessBlock settings enabled
+          - S3_BUCKET_SSL_REQUESTS_ONLY  # TLS enforced via separate DataBucketLoggingPolicy resource (DenyInsecureTransport); guard cannot correlate cross-resource policies
+    Properties:
+      BucketName: !Sub "${StackName}-data-${AWS::AccountId}"
+      ObjectLockEnabled: false
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: data-bucket-logs/
+
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: LoggingBucketPolicy
+    Metadata:
+      guard:
+        SuppressedRules:
+          - S3_BUCKET_DEFAULT_LOCK_ENABLED  # Object Lock prevents lifecycle rotation; org CloudTrail provides tamper-proof records
+          - S3_BUCKET_NO_PUBLIC_RW_ACL  # False positive — BucketOwnerPreferred required for log delivery; all PublicAccessBlock settings enabled
+          - S3_BUCKET_SSL_REQUESTS_ONLY  # TLS enforced via separate WebsiteBucketPolicy resource (DenyInsecureTransport); guard cannot correlate cross-resource policies
+    Properties:
+      BucketName: !Sub "${StackName}-website-${AWS::AccountId}"
+      ObjectLockEnabled: false
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: website-bucket-logs/
+
+  # ============================================================
+  # CloudFront
+  # ============================================================
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${StackName}-oac"
+        Description: OAC for WebsiteBucket access
+        SigningProtocol: sigv4
+        SigningBehavior: always
+        OriginAccessControlOriginType: s3
+
+  SecurityHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub "${StackName}-security-headers"
+        Comment: Security headers for KCA SPA
+        SecurityHeadersConfig:
+          ContentSecurityPolicy:
+            ContentSecurityPolicy: !Sub "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://*.execute-api.${AWS::Region}.amazonaws.com https://cognito-idp.${AWS::Region}.amazonaws.com; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            Override: true
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: true
+            Preload: true
+            Override: true
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Metadata:
+      guard:
+        SuppressedRules:
+          - CLOUDFRONT_CUSTOM_SSL_CERTIFICATE  # No custom domain configured; uses CloudFront default cert with TLSv1.2_2021
+      checkov:
+        skip:
+          - id: "CKV_AWS_174"
+            comment: "No custom domain configured. Uses CloudFront default cert with MinimumProtocolVersion TLSv1.2_2021."
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+          MinimumProtocolVersion: TLSv1.2_2021
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt WebsiteBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          Compress: true
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+        Logging:
+          Bucket: !GetAtt DataBucket.DomainName
+          IncludeCookies: false
+          Prefix: cloudfront-logs/
+
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebsiteBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "arn:aws:s3:::${WebsiteBucket}"
+              - !Sub "arn:aws:s3:::${WebsiteBucket}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          - Sid: AllowCloudFrontServicePrincipalReadOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${WebsiteBucket}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+
+  DataBucketLoggingPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DataBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "arn:aws:s3:::${DataBucket}"
+              - !Sub "arn:aws:s3:::${DataBucket}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          - Sid: AllowCloudFrontLogging
+            Effect: Allow
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::${DataBucket}/cloudfront-logs/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+
+  CloudFrontMonitoring:
+    Type: AWS::CloudFront::MonitoringSubscription
+    Properties:
+      DistributionId: !Ref CloudFrontDistribution
+      MonitoringSubscription:
+        RealtimeMetricsSubscriptionConfig:
+          RealtimeMetricsSubscriptionStatus: Enabled
+
+  # ============================================================
+  # AWS KMS — Customer Managed Key for DynamoDB and CloudWatch Logs
+  # Single key shared across all tables and log groups to minimize cost.
+  # ============================================================
+  KCAEncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "Encryption key for ${StackName} DynamoDB tables and CloudWatch Logs"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowRootAccountFullAccess
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+          - Sid: AllowCloudWatchLogs
+            Effect: Allow
+            Principal:
+              Service: !Sub "logs.${AWS::Region}.amazonaws.com"
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+            Condition:
+              ArnLike:
+                kms:EncryptionContext:aws:logs:arn: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:*"
+          - Sid: AllowDynamoDBService
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:ReEncrypt*
+              - kms:CreateGrant
+            Resource: "*"
+            Condition:
+              StringEquals:
+                kms:ViaService: !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+
+  KCAEncryptionKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${StackName}-encryption"
+      TargetKeyId: !Ref KCAEncryptionKey
+
+  # ============================================================
+  # Amazon DynamoDB Tables
+  # Encryption: Customer Managed Key (shared KCAEncryptionKey).
+  # ============================================================
+  ProcessedFilesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${StackName}-processed-files"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt KCAEncryptionKey.Arn
+      AttributeDefinitions:
+        - AttributeName: fileKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: fileKey
+          KeyType: HASH
+
+  UserNamesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${StackName}-user-names"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt KCAEncryptionKey.Arn
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+
+  FeedbackTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${StackName}-feedback"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt KCAEncryptionKey.Arn
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
+  AnalyticsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${StackName}-analytics"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt KCAEncryptionKey.Arn
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: requestId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: requestId-index
+          KeySchema:
+            - AttributeName: requestId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  # ============================================================
+  # Parameter Store
+  # ============================================================
+  BucketNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /kiro-cost-analyzer/bucket-name
+      Type: String
+      Value: !Ref SourceBucketName
+      Description: Source S3 bucket name for Kiro CSV logs
+
+  SourcePrefixParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /kiro-cost-analyzer/source-prefix
+      Type: String
+      Value: !Ref SourcePrefix
+      Description: Base prefix up to KiroLogs/
+
+  EtlStatusParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /kiro-cost-analyzer/etl-status
+      Type: String
+      Value: '{"lastExecution":null,"status":"NOT_RUN","filesProcessed":0,"recordsWritten":0,"errors":[]}'
+      Description: Last ETL execution status
+
+  PromptsPrefixParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /kiro-cost-analyzer/prompts-prefix
+      Type: String
+      Value: !Ref PromptsPrefix
+      Description: Base prefix for prompt logs in the source bucket
+
+  IdentityStoreIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /kiro-cost-analyzer/identity-store-id
+      Type: String
+      Value: !Ref IdentityStoreId
+      Description: AWS IAM Identity Center Identity Store ID
+
+  SourceBucketRoleArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /kiro-cost-analyzer/source-bucket-role-arn
+      Type: String
+      Value: !If [HasSourceBucketRoleArn, !Ref SourceBucketRoleArn, "NONE"]
+      Description: Cross-account IAM Role ARN for source S3 bucket access
+
+  IdentityStoreRoleArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /kiro-cost-analyzer/identity-store-role-arn
+      Type: String
+      Value: !If [HasIdentityStoreRoleArn, !Ref IdentityStoreRoleArn, "NONE"]
+      Description: Cross-account IAM Role ARN for IAM Identity Center access
+
+  # ============================================================
+  # API Gateway
+  # ============================================================
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub "${StackName}-api"
+      StageName: prod
+      TracingEnabled: true
+      AccessLogSetting:
+        DestinationArn: !GetAtt ApiGatewayAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","user":"$context.identity.user","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","integrationLatency":"$context.integrationLatency"}'
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: !Sub "'https://${CloudFrontDistribution.DomainName}'"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        AddDefaultAuthorizerToCorsPreflight: false
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt CognitoUserPool.Arn
+
+  ApiGatewayAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/apigateway/${StackName}-api-access-logs"
+      RetentionInDays: 90
+      KmsKeyId: !GetAtt KCAEncryptionKey.Arn
+
+  # ============================================================
+  # X-Ray Sampling Rule — limit tracing to 5% of requests
+  # ============================================================
+  XRaySamplingRule:
+    Type: AWS::XRay::SamplingRule
+    Properties:
+      SamplingRule:
+        RuleName: !Sub "${StackName}-5pct"
+        Priority: 100
+        FixedRate: 0.05
+        ReservoirSize: 1
+        ServiceName: "*"
+        ServiceType: "*"
+        Host: "*"
+        HTTPMethod: "*"
+        URLPath: "*"
+        ResourceARN: "*"
+        Version: 1
+
+  # ============================================================
+  # Lambda Layers
+  # ============================================================
+  SharedLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub "${StackName}-shared"
+      Description: Shared code — shared utils, git_shared (git_repository)
+      ContentUri: layers/shared/
+      CompatibleRuntimes:
+        - python3.13
+      RetentionPolicy: Delete
+    Metadata:
+      BuildMethod: python3.13
+
+  # ============================================================
+  # Amazon Bedrock Guardrail — Prompt Categorizer
+  # Protects the categorization pipeline against harmful content,
+  # prompt injection, and PII leakage in ingested prompts.
+  # ============================================================
+  PromptCategorizerGuardrail:
+    Type: AWS::Bedrock::Guardrail
+    Properties:
+      Name: !Sub "${StackName}-prompt-categorizer"
+      Description: "Guardrail for KCA prompt categorization — filters harmful content, prompt injection, and PII before sending to Bedrock"
+      BlockedInputMessaging: "Content blocked by guardrail — prompt contains disallowed content."
+      BlockedOutputsMessaging: "Response blocked by guardrail."
+      ContentPolicyConfig:
+        FiltersConfig:
+          - Type: HATE
+            InputStrength: HIGH
+            OutputStrength: NONE
+          - Type: INSULTS
+            InputStrength: HIGH
+            OutputStrength: NONE
+          - Type: SEXUAL
+            InputStrength: MEDIUM
+            OutputStrength: NONE
+          - Type: VIOLENCE
+            InputStrength: HIGH
+            OutputStrength: NONE
+          - Type: MISCONDUCT
+            InputStrength: MEDIUM
+            OutputStrength: NONE
+          - Type: PROMPT_ATTACK
+            InputStrength: MEDIUM
+            OutputStrength: NONE
+      TopicPolicyConfig:
+        TopicsConfig:
+          - Name: InstructionOverride
+            Definition: "Attempts to override, ignore, bypass, or manipulate the system prompt instructions or classification behavior"
+            Type: DENY
+      SensitiveInformationPolicyConfig:
+        PiiEntitiesConfig:
+          - Type: EMAIL
+            Action: ANONYMIZE
+          - Type: PHONE
+            Action: ANONYMIZE
+          - Type: AWS_ACCESS_KEY
+            Action: BLOCK
+          - Type: AWS_SECRET_KEY
+            Action: BLOCK
+          - Type: CREDIT_DEBIT_CARD_NUMBER
+            Action: BLOCK
+
+  PromptCategorizerGuardrailVersion:
+    Type: AWS::Bedrock::GuardrailVersion
+    Properties:
+      GuardrailIdentifier: !GetAtt PromptCategorizerGuardrail.GuardrailId
+      Description: "Initial version for KCA prompt categorizer"
+
+  # ============================================================
+  # ETL Pipeline — Step Functions Lambdas
+  # ============================================================
+  ListFilesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${StackName}-list-files"
+      Handler: list_handler.list_handler
+      CodeUri: etl/
+      Description: ETL pipeline — lists new S3 files not yet processed
+      MemorySize: 1024
+      Timeout: 60
+      Layers:
+        - !Ref SharedLayer
+      Environment:
+        Variables:
+          PROCESSED_FILES_TABLE: !Ref ProcessedFilesTable
+          SSM_BUCKET_NAME: /kiro-cost-analyzer/bucket-name
+          SSM_SOURCE_PREFIX: /kiro-cost-analyzer/source-prefix
+          SSM_PROMPTS_PREFIX: /kiro-cost-analyzer/prompts-prefix
+          SSM_IDENTITY_STORE_ID: /kiro-cost-analyzer/identity-store-id
+          SSM_SOURCE_BUCKET_ROLE_ARN: /kiro-cost-analyzer/source-bucket-role-arn
+      Policies:
+        - Statement:
+            - Sid: ReadSourceBucket
+              Effect: Allow
+              Action:
+                - s3:ListBucket
+              Resource:
+                - !Sub "arn:aws:s3:::${SourceBucketName}"
+            - Sid: DynamoDBScanProcessedFiles
+              Effect: Allow
+              Action:
+                - dynamodb:Scan
+              Resource:
+                - !GetAtt ProcessedFilesTable.Arn
+            - Sid: KMSForDynamoDB
+              Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+                - kms:DescribeKey
+              Resource:
+                - !GetAtt KCAEncryptionKey.Arn
+            - Sid: SSMAccess
+              Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/kiro-cost-analyzer/*"
+        - !If
+          - HasSourceBucketRoleArn
+          - Statement:
+              - Sid: AssumeSourceBucketRole
+                Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource:
+                  - !Ref SourceBucketRoleArn
+          - !Ref "AWS::NoValue"
+
+  ParseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${StackName}-parse"
+      Handler: parse_handler.parse_handler
+      CodeUri: etl/
+      Description: ETL pipeline — reads S3 file, parses, normalizes and resolves user names
+      MemorySize: 1024
+      Timeout: 300
+      Layers:
+        - !Ref SharedLayer
+      Environment:
+        Variables:
+          SSM_BUCKET_NAME: /kiro-cost-analyzer/bucket-name
+          SSM_SOURCE_PREFIX: /kiro-cost-analyzer/source-prefix
+          SSM_PROMPTS_PREFIX: /kiro-cost-analyzer/prompts-prefix
+          SSM_IDENTITY_STORE_ID: /kiro-cost-analyzer/identity-store-id
+          SSM_SOURCE_BUCKET_ROLE_ARN: /kiro-cost-analyzer/source-bucket-role-arn
+          SSM_IDENTITY_STORE_ROLE_ARN: /kiro-cost-analyzer/identity-store-role-arn
+          USER_NAMES_TABLE: !Ref UserNamesTable
+      Policies:
+        - Statement:
+            - Sid: ReadSourceBucket
+              Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                - !Sub "arn:aws:s3:::${SourceBucketName}/*"
+            - Sid: KMSDecrypt
+              Effect: Allow
+              Action:
+                - kms:Decrypt
+              # Resource "*" is required: the source bucket may use a CMK in
+              # another account/region whose ARN is not known at deploy time.
+              # This permission is only exercisable when the Lambda has access
+              # to the key via the cross-account role's key policy.
+              Resource: "*"
+            - Sid: UserNamesTableAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource:
+                - !GetAtt UserNamesTable.Arn
+            - Sid: KMSForDynamoDB
+              Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+                - kms:DescribeKey
+              Resource:
+                - !GetAtt KCAEncryptionKey.Arn
+            - Sid: IdentityCenterAccess
+              Effect: Allow
+              Action:
+                - identitystore:DescribeUser
+                - identitystore:ListUsers
+              # Resource "*" is required: Identity Store does not support
+              # resource-level permissions for these read-only actions.
+              Resource: "*"
+            - Sid: SSMAccess
+              Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/kiro-cost-analyzer/*"
+        - !If
+          - HasSourceBucketRoleArn
+          - Statement:
+              - Sid: AssumeSourceBucketRole
+                Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource:
+                  - !Ref SourceBucketRoleArn
+          - !Ref "AWS::NoValue"
+        - !If
+          - HasIdentityStoreRoleArn
+          - Statement:
+              - Sid: AssumeIdentityStoreRole
+                Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource:
+                  - !Ref IdentityStoreRoleArn
+          - !Ref "AWS::NoValue"
+
+  WriterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${StackName}-writer"
+      Handler: writer_handler.writer_handler
+      CodeUri: etl/
+      Description: ETL pipeline — writes parsed records to DynamoDB and S3
+      MemorySize: 1024
+      Timeout: 300
+      Layers:
+        - !Ref SharedLayer
+      Environment:
+        Variables:
+          ANALYTICS_TABLE: !Ref AnalyticsTable
+          DATA_BUCKET: !Ref DataBucket
+      Policies:
+        - Statement:
+            - Sid: AnalyticsTableAccess
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:GetItem
+              Resource:
+                - !GetAtt AnalyticsTable.Arn
+            - Sid: KMSForDynamoDB
+              Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+                - kms:DescribeKey
+              Resource:
+                - !GetAtt KCAEncryptionKey.Arn
+            - Sid: WriteDataBucket
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                - !Sub "arn:aws:s3:::${DataBucket}/*"
+            - Sid: SSMAccess
+              Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/kiro-cost-analyzer/*"
+
+  RecordStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${StackName}-record-status"
+      Handler: record_status_handler.record_status_handler
+      CodeUri: etl/
+      Description: ETL pipeline — records execution summary to SSM Parameter Store
+      MemorySize: 1024
+      Timeout: 60
+      Layers:
+        - !Ref SharedLayer
+      Environment:
+        Variables:
+          SSM_ETL_STATUS: /kiro-cost-analyzer/etl-status
+      Policies:
+        - Statement:
+            - Sid: SSMAccess
+              Effect: Allow
+              Action:
+                - ssm:PutParameter
+              Resource:
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/kiro-cost-analyzer/*"
+            - Sid: ReadMapResults
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:ListBucket
+              Resource:
+                - !Sub "arn:aws:s3:::${DataBucket}"
+                - !Sub "arn:aws:s3:::${DataBucket}/etl-results/*"
+
+  ReconcileUsersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${StackName}-reconcile-users"
+      Handler: reconcile_users_handler.reconcile_users_handler
+      CodeUri: etl/
+      Description: ETL pipeline — reconciles UserNamesTable against IAM Identity Center
+      MemorySize: 512
+      Timeout: 300
+      Layers:
+        - !Ref SharedLayer
+      Environment:
+        Variables:
+          IDENTITY_STORE_ID: !Ref IdentityStoreId
+          USER_NAMES_TABLE: !Ref UserNamesTable
+      Policies:
+        - Statement:
+            - Sid: UserNamesTableAccess
+              Effect: Allow
+              Action:
+                - dynamodb:Scan
+                - dynamodb:UpdateItem
+              Resource:
+                - !GetAtt UserNamesTable.Arn
+            - Sid: KMSForDynamoDB
+              Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+                - kms:DescribeKey
+              Resource:
+                - !GetAtt KCAEncryptionKey.Arn
+            - Sid: IdentityCenterListAccess
+              Effect: Allow
+              Action:
+                - identitystore:ListUsers
+              # Resource "*" required: Identity Store does not support
+              # resource-level permissions for read-only actions.
+              Resource: "*"
+
+  ListUncategorizedFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${StackName}-list-uncategorized"
+      Handler: list_uncategorized_handler.list_uncategorized_handler
+      CodeUri: etl/
+      Description: ETL pipeline — lists prompts with category NOT_CATEGORIZED
+      MemorySize: 1024
+      Timeout: 300
+      Layers:
+        - !Ref SharedLayer
+      Environment:
+        Variables:
+          ANALYTICS_TABLE: !Ref AnalyticsTable
+          DATA_BUCKET: !Ref DataBucket
+      Policies:
+        - Statement:
+            - Sid: AnalyticsTableScan
+              Effect: Allow
+              Action:
+                - dynamodb:Scan
+              Resource:
+                - !GetAtt AnalyticsTable.Arn
+            - Sid: KMSForDynamoDB
+              Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+                - kms:DescribeKey
+              Resource:
+                - !GetAtt KCAEncryptionKey.Arn
+            - Sid: WriteCategorizationPending
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                - !Sub "arn:aws:s3:::${DataBucket}/categorization-pending/*"
+
+  CategorizePromptFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${StackName}-categorize-prompt"
+      Handler: categorize_prompt_handler.categorize_prompt_handler
+      CodeUri: etl/
+      Description: ETL pipeline — categorizes a single prompt using Amazon Bedrock Claude Haiku 4.5
+      MemorySize: 1024
+      Timeout: 60
+      Layers:
+        - !Ref SharedLayer
+      Environment:
+        Variables:
+          ANALYTICS_TABLE: !Ref AnalyticsTable
+          DATA_BUCKET: !Ref DataBucket
+          # Use the global Claude Haiku 4.5 inference profile from
+          # sa-east-1 so the Converse call lands in the same region as
+          # the guardrail. The previous configuration pointed at the
+          # us.anthropic.* profile and forced the Converse call into
+          # us-east-1, where the regional guardrail does not exist —
+          # producing "guardrail identifier or version does not exist".
+          BEDROCK_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+          BEDROCK_REGION: !Ref AWS::Region
+          GUARDRAIL_ID: !GetAtt PromptCategorizerGuardrail.GuardrailId
+          GUARDRAIL_VERSION: !GetAtt PromptCategorizerGuardrailVersion.Version
+      Policies:
+        - Statement:
+            - Sid: BedrockInvokeModel
+              Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                # 1) Regional inference profile (the global.* alias in the
+                #    source region — sa-east-1).
+                - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0"
+                # 2) Regional foundation model (used by the inference
+                #    profile to execute in-region).
+                - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
+                # 3) Global foundation model — required for the cross-
+                #    region routing the global.* profile performs. Has
+                #    no region or account: see "IAM policy requirements
+                #    for global cross-Region inference" in the Bedrock
+                #    docs.
+                - "arn:aws:bedrock:::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
+            - Sid: BedrockApplyGuardrail
+              Effect: Allow
+              Action:
+                - bedrock:ApplyGuardrail
+              Resource:
+                - !GetAtt PromptCategorizerGuardrail.GuardrailArn
+            - Sid: AnalyticsTableReadWrite
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource:
+                - !GetAtt AnalyticsTable.Arn
+            - Sid: KMSForDynamoDB
+              Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+                - kms:DescribeKey
+              Resource:
+                - !GetAtt KCAEncryptionKey.Arn
+            - Sid: ReadDataBucket
+              Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                - !Sub "arn:aws:s3:::${DataBucket}/*"
+
+  # ============================================================
+  # ETL Pipeline — Step Functions State Machine
+  # ============================================================
+  EtlStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub "${StackName}-etl-state-machine"
+      Type: STANDARD
+      Tracing:
+        Enabled: true
+      Events:
+        EtlSchedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: !Ref EtlScheduleExpression
+            Description: Scheduled ETL execution
+      Definition:
+        Comment: "ETL Pipeline — processes S3 files in parallel (Standard Workflow)"
+        StartAt: ListNewFiles
+        States:
+          ListNewFiles:
+            Type: Task
+            Resource: !GetAtt ListFilesFunction.Arn
+            ResultPath: "$.listResult"
+            Next: CheckNewFiles
+            Retry:
+              - ErrorEquals:
+                  - States.TaskFailed
+                IntervalSeconds: 5
+                MaxAttempts: 2
+                BackoffRate: 2.0
+
+          CheckNewFiles:
+            Type: Choice
+            Choices:
+              - Variable: "$.listResult.newFilesCount"
+                NumericGreaterThan: 0
+                Next: ProcessFiles
+            Default: RecordStatusNoFiles
+
+          RecordStatusNoFiles:
+            Type: Task
+            Resource: "arn:aws:states:::dynamodb:putItem"
+            Parameters:
+              TableName: !Ref AnalyticsTable
+              Item:
+                PK:
+                  S: "ETL_STATUS"
+                SK:
+                  S.$: "States.Format('EXEC#{}', $$.Execution.Name)"
+                status:
+                  S: "SUCCESS"
+                filesProcessed:
+                  N: "0"
+                recordsWritten:
+                  N: "0"
+                timestamp:
+                  S.$: "$$.State.EnteredTime"
+                executionArn:
+                  S.$: "$$.Execution.Id"
+            # Even with no new files, run the categorization pass — items
+            # already in the table can be re-categorized by manually
+            # resetting their ``category`` to ``NOT_CATEGORIZED``. This
+            # also keeps the reconcile step reachable on every run.
+            Next: ListUncategorizedPrompts
+
+          ProcessFiles:
+            Type: Map
+            ItemsPath: "$.listResult.newFiles"
+            MaxConcurrency: 40
+            ToleratedFailurePercentage: 100
+            Label: ProcessFiles
+            ItemSelector:
+              bucket.$: "$.listResult.bucket"
+              key.$: "$$.Map.Item.Value.key"
+              fileType.$: "$$.Map.Item.Value.fileType"
+            ItemProcessor:
+              ProcessorConfig:
+                Mode: DISTRIBUTED
+                ExecutionType: EXPRESS
+              StartAt: ParseAndNormalize
+              States:
+                ParseAndNormalize:
+                  Type: Task
+                  Resource: !GetAtt ParseFunction.Arn
+                  Parameters:
+                    bucket.$: "$.bucket"
+                    key.$: "$.key"
+                    fileType.$: "$.fileType"
+                  ResultPath: "$.parseResult"
+                  Next: WriteToDynamoDB
+                  Retry:
+                    - ErrorEquals:
+                        - Lambda.ServiceException
+                        - Lambda.TooManyRequestsException
+                      IntervalSeconds: 2
+                      MaxAttempts: 3
+                      BackoffRate: 2.0
+
+                WriteToDynamoDB:
+                  Type: Task
+                  Resource: !GetAtt WriterFunction.Arn
+                  Parameters:
+                    records.$: "$.parseResult.records"
+                    fileType.$: "$.fileType"
+                    key.$: "$.key"
+                  ResultPath: "$.writeResult"
+                  Next: MarkFileProcessed
+                  Retry:
+                    - ErrorEquals:
+                        - DynamoDB.ProvisionedThroughputExceededException
+                        - Lambda.ServiceException
+                      IntervalSeconds: 2
+                      MaxAttempts: 3
+                      BackoffRate: 2.0
+
+                MarkFileProcessed:
+                  Type: Task
+                  Resource: "arn:aws:states:::dynamodb:putItem"
+                  Parameters:
+                    TableName: !Ref ProcessedFilesTable
+                    Item:
+                      fileKey:
+                        S.$: "$.key"
+                      processedAt:
+                        S.$: "$$.State.EnteredTime"
+                      recordCount:
+                        N.$: "States.JsonToString($.writeResult.recordCount)"
+                      status:
+                        S: "SUCCESS"
+                      errorMessage:
+                        S: ""
+                  ResultPath: "$.markResult"
+                  End: true
+            ResultWriter:
+              Resource: "arn:aws:states:::s3:putObject"
+              Parameters:
+                Bucket: !Ref DataBucket
+                Prefix: "etl-results"
+            ResultPath: "$.mapResults"
+            Next: CheckHasMore
+
+          CheckHasMore:
+            Type: Choice
+            Choices:
+              - Variable: "$.listResult.hasMore"
+                BooleanEquals: true
+                Next: ListNewFiles
+            Default: RecordStatus
+
+          RecordStatus:
+            Type: Task
+            Resource: !GetAtt RecordStatusFunction.Arn
+            Parameters:
+              executionId.$: "$$.Execution.Id"
+              listResult.$: "$.listResult"
+              mapResultsBucket.$: "$.mapResults.ResultWriterDetails.Bucket"
+              mapResultsKey.$: "$.mapResults.ResultWriterDetails.Key"
+            ResultPath: "$.recordStatusResult"
+            Next: CheckEtlErrors
+
+          CheckEtlErrors:
+            Type: Choice
+            Choices:
+              - Variable: "$.recordStatusResult.filesFailed"
+                NumericGreaterThan: 0
+                Next: EtlFilesFailed
+            Default: ListUncategorizedPrompts
+
+          EtlFilesFailed:
+            Type: Fail
+            Error: "EtlFilesFailed"
+            CausePath: "States.Format('{} file(s) failed during ETL. First error: {}', $.recordStatusResult.filesFailed, States.ArrayGetItem($.recordStatusResult.errors, 0))"
+
+          ListUncategorizedPrompts:
+            Type: Task
+            Resource: !GetAtt ListUncategorizedFunction.Arn
+            ResultPath: "$"
+            Next: CheckUncategorized
+            Retry:
+              - ErrorEquals:
+                  - States.TaskFailed
+                IntervalSeconds: 5
+                MaxAttempts: 2
+                BackoffRate: 2.0
+
+          CheckUncategorized:
+            Type: Choice
+            Choices:
+              - Variable: "$.count"
+                NumericGreaterThan: 0
+                Next: CategorizePrompts
+            Default: CategorizationComplete
+
+          CategorizePrompts:
+            Type: Map
+            MaxConcurrency: 50
+            Label: CategorizePrompts
+            ItemReader:
+              Resource: "arn:aws:states:::s3:getObject"
+              ReaderConfig:
+                InputType: JSON
+              Parameters:
+                Bucket.$: "$.bucket"
+                Key.$: "$.key"
+            ItemProcessor:
+              ProcessorConfig:
+                Mode: DISTRIBUTED
+                ExecutionType: STANDARD
+              StartAt: CategorizeOnePrompt
+              States:
+                CategorizeOnePrompt:
+                  Type: Task
+                  Resource: !GetAtt CategorizePromptFunction.Arn
+                  End: true
+                  Retry:
+                    - ErrorEquals:
+                        - Lambda.TooManyRequestsException
+                        - Lambda.ServiceException
+                      IntervalSeconds: 2
+                      MaxAttempts: 6
+                      BackoffRate: 2.0
+            ResultWriter:
+              Resource: "arn:aws:states:::s3:putObject"
+              Parameters:
+                Bucket: !Ref DataBucket
+                Prefix: "categorization-results"
+            Next: CategorizationComplete
+
+          CategorizationComplete:
+            Type: Pass
+            Next: ReconcileUsers
+
+          # Reconcile UserNamesTable against IDC. Runs after data ingestion
+          # to mark users that have been removed from Identity Center as
+          # tombstoned. Failures are caught and silently dropped — the
+          # pipeline must not fail because reconcile had a hiccup.
+          ReconcileUsers:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              FunctionName: !Ref ReconcileUsersFunction
+              Payload: {}
+            ResultPath: "$.reconcile"
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                ResultPath: "$.reconcileError"
+                Next: ReconcileFailed
+            Next: PipelineDone
+
+          ReconcileFailed:
+            Type: Pass
+            End: true
+
+          PipelineDone:
+            Type: Pass
+            End: true
+
+      Policies:
+        - Statement:
+            - Sid: XRayTracing
+              Effect: Allow
+              Action:
+                - xray:PutTraceSegments
+                - xray:PutTelemetryRecords
+                - xray:GetSamplingRules
+                - xray:GetSamplingTargets
+              # Resource "*" is required: X-Ray does not support resource-level permissions.
+              Resource: "*"
+            - Sid: InvokeLambdas
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource:
+                - !GetAtt ListFilesFunction.Arn
+                - !GetAtt ParseFunction.Arn
+                - !GetAtt WriterFunction.Arn
+                - !GetAtt RecordStatusFunction.Arn
+                - !GetAtt ListUncategorizedFunction.Arn
+                - !GetAtt CategorizePromptFunction.Arn
+                - !GetAtt ReconcileUsersFunction.Arn
+            - Sid: DynamoDBPutItem
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource:
+                - !GetAtt ProcessedFilesTable.Arn
+                - !GetAtt AnalyticsTable.Arn
+            - Sid: KMSForDynamoDB
+              Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+                - kms:DescribeKey
+              Resource:
+                - !GetAtt KCAEncryptionKey.Arn
+            - Sid: DistributedMapExecution
+              Effect: Allow
+              Action:
+                - states:StartExecution
+                - states:DescribeExecution
+                - states:StopExecution
+              Resource:
+                - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${StackName}-etl-state-machine"
+                - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:${StackName}-etl-state-machine/*"
+            - Sid: DistributedMapResultWriter
+              Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+                - s3:ListBucket
+              Resource:
+                - !Sub "arn:aws:s3:::${DataBucket}"
+                - !Sub "arn:aws:s3:::${DataBucket}/etl-results/*"
+                - !Sub "arn:aws:s3:::${DataBucket}/categorization-pending/*"
+                - !Sub "arn:aws:s3:::${DataBucket}/categorization-results/*"
+
+
+  # ============================================================
+  # Backend API
+  # ============================================================
+  BackendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${StackName}-backend"
+      Handler: handler.lambda_handler
+      CodeUri: backend/
+      Description: API backend — serves data via DynamoDB, manages config and users
+      MemorySize: 256
+      Timeout: 90
+      Layers:
+        - !Ref SharedLayer
+      Environment:
+        Variables:
+          ALLOWED_ORIGIN: !Sub "https://${CloudFrontDistribution.DomainName}"
+          DATA_BUCKET: !Ref DataBucket
+          PROCESSED_FILES_TABLE: !Ref ProcessedFilesTable
+          ANALYTICS_TABLE: !Ref AnalyticsTable
+          STATE_MACHINE_ARN: !Ref EtlStateMachine
+          USER_POOL_ID: !Ref CognitoUserPool
+          SSM_BUCKET_NAME: /kiro-cost-analyzer/bucket-name
+          SSM_SOURCE_PREFIX: /kiro-cost-analyzer/source-prefix
+          SSM_ETL_STATUS: /kiro-cost-analyzer/etl-status
+          SSM_PROMPTS_PREFIX: /kiro-cost-analyzer/prompts-prefix
+          SSM_IDENTITY_STORE_ID: /kiro-cost-analyzer/identity-store-id
+          SSM_SOURCE_BUCKET_ROLE_ARN: /kiro-cost-analyzer/source-bucket-role-arn
+          SSM_IDENTITY_STORE_ROLE_ARN: /kiro-cost-analyzer/identity-store-role-arn
+          USER_NAMES_TABLE: !Ref UserNamesTable
+          FEEDBACK_TABLE: !Ref FeedbackTable
+          ETL_SCHEDULE_NAME: !Ref EtlStateMachineEtlSchedule
+          AGENT_RUNTIME_ARN: !Sub "arn:aws:bedrock-agentcore:sa-east-1:${AWS::AccountId}:runtime/GitCorrelationAgent-bnVS1RFwhi"
+          CORRELATION_WORKER_ARN: !GetAtt CorrelationWorkerFunction.Arn
+      Events:
+        MeGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/me
+            Method: GET
+        KiroUsersGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/kiro-users
+            Method: GET
+        UsageGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/usage
+            Method: GET
+        EngagementGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/usage/engagement
+            Method: GET
+        AccountUsageGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/usage/account
+            Method: GET
+        UsageExportGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/usage/export
+            Method: GET
+        ConfigGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/config
+            Method: GET
+        ConfigBucketPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/config/bucket
+            Method: PUT
+        EtlTriggerPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/etl/trigger
+            Method: POST
+        UsersGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/users
+            Method: GET
+        UsersPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/users
+            Method: POST
+        UsersDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/users/{userId}
+            Method: DELETE
+        UsersPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/users/{userId}
+            Method: PUT
+        PromptsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/prompts
+            Method: GET
+        PromptsDetailGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/prompts/{requestId}
+            Method: GET
+        UserDetailsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/usage/{userId}/details
+            Method: GET
+        ConfigPromptsPrefixPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/config/prompts-prefix
+            Method: PUT
+        ConfigIdentityStoreIdPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/config/identity-store-id
+            Method: PUT
+        ConfigSourceBucketRoleArnPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/config/source-bucket-role-arn
+            Method: PUT
+        ConfigIdentityStoreRoleArnPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/config/identity-store-role-arn
+            Method: PUT
+        ConfigPromptHistoryEnabledPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/config/prompt-history-enabled
+            Method: PUT
+        ConfigScheduleGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/config/schedule
+            Method: GET
+        EngagementThresholdsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/config/engagement-thresholds
+            Method: GET
+        EngagementThresholdsPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/config/engagement-thresholds
+            Method: PUT
+        FeedbackSubmitPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/prompts/{requestId}/feedback
+            Method: POST
+        FeedbackListGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/feedback
+            Method: GET
+        FeedbackReviewPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/feedback/{feedbackId}/review
+            Method: PUT
+        GitReposPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/git/repos
+            Method: POST
+        ProductivityCorrelationGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/productivity/{userId}/correlation
+            Method: GET
+        GitReposGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/git/repos
+            Method: GET
+        GitReposDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/git/repos/{repoId}
+            Method: DELETE
+        GitRepoSync:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/git/repos/{repoId}/sync
+            Method: POST
+        GitMappingsPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/git/mappings
+            Method: POST
+        GitMappingsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/git/mappings/{userId}
+            Method: GET
+        GitMappingsDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/git/mappings/{userId}/{provider}/{gitUsername}
+            Method: DELETE
+        RecommendationsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/recommendations/tier-optimization
+            Method: GET
+        TierPricingGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/config/tier-pricing
+            Method: GET
+        TierPricingPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/config/tier-pricing
+            Method: PUT
+      Policies:
+        - Statement:
+            - Sid: ReadDataBucket
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:ListBucket
+                - s3:GetBucketLocation
+                - s3:PutObject
+              Resource:
+                - !Sub "arn:aws:s3:::${DataBucket}"
+                - !Sub "arn:aws:s3:::${DataBucket}/*"
+            - Sid: ValidateSourceBucket
+              Effect: Allow
+              Action:
+                - s3:ListBucket
+              # Resource "*" is intentional: admins validate connectivity to
+              # any bucket name entered in the Settings page.
+              Resource: "arn:aws:s3:::*"
+            - Sid: DynamoDBReadAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - !GetAtt ProcessedFilesTable.Arn
+                - !GetAtt UserNamesTable.Arn
+            - Sid: AnalyticsTableReadAccess
+              Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+                - dynamodb:BatchGetItem
+                - dynamodb:Scan
+                - dynamodb:UpdateItem
+              Resource:
+                - !GetAtt AnalyticsTable.Arn
+                - !Sub "${AnalyticsTable.Arn}/index/*"
+            - Sid: FeedbackTableAccess
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+                - dynamodb:UpdateItem
+              Resource:
+                - !GetAtt FeedbackTable.Arn
+            - Sid: StepFunctionsAccess
+              Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource:
+                - !Ref EtlStateMachine
+            - Sid: SSMAccess
+              Effect: Allow
+              Action:
+                - ssm:GetParameter
+                - ssm:PutParameter
+              Resource:
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/kiro-cost-analyzer/*"
+            - Sid: CognitoAdminAccess
+              Effect: Allow
+              Action:
+                - cognito-idp:AdminCreateUser
+                - cognito-idp:AdminDeleteUser
+                - cognito-idp:AdminDisableUser
+                - cognito-idp:AdminEnableUser
+                - cognito-idp:AdminGetUser
+                - cognito-idp:AdminUpdateUserAttributes
+                - cognito-idp:AdminAddUserToGroup
+                - cognito-idp:AdminRemoveUserFromGroup
+                - cognito-idp:AdminListGroupsForUser
+                - cognito-idp:ListUsers
+              Resource:
+                - !GetAtt CognitoUserPool.Arn
+            - Sid: SchedulerReadAccess
+              Effect: Allow
+              Action:
+                - scheduler:GetSchedule
+              Resource:
+                - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/*"
+            - Sid: SSMGitTokensAccess
+              Effect: Allow
+              Action:
+                - ssm:GetParameter
+                - ssm:GetParametersByPath
+                - ssm:PutParameter
+                - ssm:DeleteParameter
+              Resource:
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/kiro-cost-analyzer/git-tokens/*"
+            - Sid: KMSForGitTokens
+              Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+              Resource: !Sub "arn:aws:kms:*:${AWS::AccountId}:key/*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
+            - Sid: KMSForDynamoDB
+              Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+                - kms:DescribeKey
+              Resource:
+                - !GetAtt KCAEncryptionKey.Arn
+            - Sid: AnalyticsTableWriteForGit
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:DeleteItem
+                - dynamodb:UpdateItem
+              Resource:
+                - !GetAtt AnalyticsTable.Arn
+            - Sid: BedrockAgentCoreInvoke
+              Effect: Allow
+              Action:
+                - bedrock-agentcore:InvokeAgentRuntime
+              Resource:
+                - !Sub "arn:aws:bedrock-agentcore:sa-east-1:${AWS::AccountId}:runtime/*"
+            - Sid: InvokeCorrelationWorker
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource:
+                - !GetAtt CorrelationWorkerFunction.Arn
+
+  # ============================================================
+  # Correlation Worker Lambda (async AgentCore invocation)
+  # ============================================================
+  CorrelationWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${StackName}-correlation-worker"
+      Handler: handlers.correlation_worker.lambda_handler
+      CodeUri: backend/
+      Description: Async worker — invokes AgentCore for correlation analysis
+      MemorySize: 256
+      Timeout: 500
+      Layers:
+        - !Ref SharedLayer
+      Environment:
+        Variables:
+          ANALYTICS_TABLE: !Ref AnalyticsTable
+          AGENT_RUNTIME_ARN: !Sub "arn:aws:bedrock-agentcore:sa-east-1:${AWS::AccountId}:runtime/GitCorrelationAgent-bnVS1RFwhi"
+      Policies:
+        - Statement:
+            - Sid: AnalyticsTableAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+              Resource:
+                - !GetAtt AnalyticsTable.Arn
+            - Sid: KMSForDynamoDB
+              Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+                - kms:DescribeKey
+              Resource:
+                - !GetAtt KCAEncryptionKey.Arn
+            - Sid: BedrockAgentCoreInvoke
+              Effect: Allow
+              Action:
+                - bedrock-agentcore:InvokeAgentRuntime
+              Resource:
+                - !Sub "arn:aws:bedrock-agentcore:sa-east-1:${AWS::AccountId}:runtime/*"
+            - Sid: SSMAccess
+              Effect: Allow
+              Action:
+                - ssm:GetParameter
+                - ssm:GetParametersByPath
+              Resource:
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/kiro-cost-analyzer/*"
+            - Sid: KMSDecryptGitTokens
+              Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: !Sub "arn:aws:kms:*:${AWS::AccountId}:key/*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
+
+  # ============================================================
+  # AgentCore Execution Role
+  # IAM role assumed by the Bedrock AgentCore runtime to run the
+  # GitCorrelationAgent. Managed here so permissions are version-
+  # controlled and deployed via `make deploy-infra`.
+  # ============================================================
+  AgentCoreExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${StackName}-agentcore-execution"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AssumeRolePolicy
+            Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref "AWS::AccountId"
+              ArnLike:
+                aws:SourceArn: !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*"
+      ManagedPolicyArns:
+        - !Ref AgentCoreRuntimeBasePolicy
+        - !Ref AgentCoreAppPermissionsPolicy
+
+  AgentCoreRuntimeBasePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "${StackName}-agentcore-runtime-base"
+      Description: Base permissions for Amazon Bedrock AgentCore runtime (logs, tracing, model invocation)
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CloudWatchLogs
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:DescribeLogStreams
+              - logs:DescribeLogGroups
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*"
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*"
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:*"
+          - Sid: XRayTracing
+            Effect: Allow
+            Action:
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+              - xray:GetSamplingRules
+              - xray:GetSamplingTargets
+            # Resource "*" is required: X-Ray does not support resource-level permissions.
+            Resource: "*"
+          - Sid: CloudWatchMetrics
+            Effect: Allow
+            Action:
+              - cloudwatch:PutMetricData
+            Resource: "*"
+            Condition:
+              StringEquals:
+                cloudwatch:namespace: bedrock-agentcore
+          - Sid: BedrockModelInvocation
+            Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:InvokeModelWithResponseStream
+            Resource:
+              - "arn:aws:bedrock:*::foundation-model/anthropic.*"
+              - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+
+  AgentCoreAppPermissionsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "${StackName}-agentcore-app-permissions"
+      Description: Application permissions for GitCorrelationAgent (SSM, KMS, DynamoDB)
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SSMGitTokenAccess
+            Effect: Allow
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParametersByPath
+            Resource:
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/kiro-cost-analyzer/*"
+          - Sid: KMSDecryptForSSM
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+            Resource: !Sub "arn:aws:kms:*:${AWS::AccountId}:key/*"
+            Condition:
+              StringEquals:
+                kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
+          - Sid: DynamoDBAnalyticsRead
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:Query
+              - dynamodb:Scan
+            Resource:
+              - !GetAtt AnalyticsTable.Arn
+              - !Sub "${AnalyticsTable.Arn}/index/*"
+          - Sid: KMSForDynamoDB
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+              - kms:DescribeKey
+            Resource:
+              - !GetAtt KCAEncryptionKey.Arn
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod"
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref CognitoUserPool
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref CognitoUserPoolClient
+  CognitoDomain:
+    Description: Cognito Hosted UI domain
+    Value: !Sub "${StackName}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
+  DataBucketName:
+    Description: S3 bucket for Parquet data
+    Value: !Ref DataBucket
+  WebsiteBucketName:
+    Description: S3 bucket for SPA hosting
+    Value: !Ref WebsiteBucket
+  BackendFunctionArn:
+    Description: Backend Lambda function ARN
+    Value: !GetAtt BackendFunction.Arn
+  CloudFrontDomainName:
+    Description: CloudFront distribution domain name
+    Value: !GetAtt CloudFrontDistribution.DomainName
+  CloudFrontDistributionId:
+    Description: CloudFront distribution ID
+    Value: !Ref CloudFrontDistribution
+  AgentCoreExecutionRoleArn:
+    Description: IAM Role ARN for the AgentCore GitCorrelationAgent
+    Value: !GetAtt AgentCoreExecutionRole.Arn
