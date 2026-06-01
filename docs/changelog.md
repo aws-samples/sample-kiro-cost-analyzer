@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+### Documentation — README slimmed down, deep content moved to `docs/`
+
+- **README** — trimmed to a focused overview: what the project is, condensed feature list, stack, architecture pointer, install, uninstall, tests, what the sample demonstrates, and the *Built with Kiro* section. Removed the inline screenshot walkthrough, the two-scenario cost tables, and the standalone security-control table; these now live in dedicated docs and are linked from the README and the Documentation table.
+- **`docs/features.md`** (new) — full feature walkthrough with all screenshots, moved out of the README.
+- **`docs/cost.md`** (new) — light and heavy workload cost scenarios with the per-service breakdown and the "reading the numbers" analysis.
+- **`docs/security.md`** (new) — defense-in-depth control table and threat-model pointer.
+
 ### Fix — Prompt categorization broken by guardrail region mismatch
 
 - **Bug** — every prompt categorized as `Classification Error` after a fresh deploy. The Prompt History tab and the per-user category distribution chart rendered empty.
