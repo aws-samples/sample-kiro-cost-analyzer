@@ -27,6 +27,9 @@
     "react-i18next": "17.0.4",
     "react-router-dom": "^7.14.0"
   },
+  "overrides": {
+    "js-cookie": "^3.0.7"
+  },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
     "@testing-library/jest-dom": "^6.9.1",

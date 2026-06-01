@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+### Security — Frontend dependency vulnerabilities resolved (`npm audit`: 0)
+
+- **Moderate (dev, non-breaking)** — bumped `brace-expansion` `5.0.5 → 5.0.6` (GHSA-jxxr-4gwj-5jf2, ReDoS-style resource consumption) and `postcss` `8.5.9 → 8.5.15` (GHSA-qx2v-qp2m-jg93, XSS via unescaped `</style>` in stringify output; pulls `nanoid 3.3.11 → 3.3.12`) via `npm audit fix`. Both are transitive dev dependencies (eslint / vite toolchain).
+- **High (runtime)** — `amazon-cognito-identity-js@6.3.16` (latest) pins `js-cookie@2.2.1`, which is in the vulnerable range of GHSA-qjx8-664m-686j (prototype hijack in `assign()` enabling cookie-attribute injection). The 2.x line has no patch; the fix lands in `js-cookie@3.0.7+`. Added a package.json `overrides` entry forcing `js-cookie@^3.0.7` (resolves to `3.0.8`) instead of taking npm's suggested major **downgrade** of cognito to `1.24.0`. This app configures Cognito with the default `localStorage` backend (`AuthProvider.tsx` passes no `Storage` option), so the `CookieStorage` code path that consumes js-cookie is never instantiated — the override clears the advisory without affecting runtime behavior.
+- **Build hygiene** — js-cookie 3.x dropped the default export cognito's unused `CookieStorage.js` imports, producing a benign `IMPORT_IS_UNDEFINED` Rollup warning. Added a narrowly scoped `onwarn` filter in `vite.config.ts` that suppresses only that exact warning (matched by code + module path) and lets all others through. Documented inline with the advisory reference and the dead-code rationale.
+
 ### Documentation — README slimmed down, deep content moved to `docs/`
 
 - **README** — trimmed to a focused overview: what the project is, condensed feature list, stack, architecture pointer, install, uninstall, tests, what the sample demonstrates, and the *Built with Kiro* section. Removed the inline screenshot walkthrough, the two-scenario cost tables, and the standalone security-control table; these now live in dedicated docs and are linked from the README and the Documentation table.
