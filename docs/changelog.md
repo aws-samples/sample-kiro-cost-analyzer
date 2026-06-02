@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+### Tooling — `make deploy-all` orchestrator and a clearer AgentCore preflight
+
+- **`make deploy-all`** runs the full path in order — infrastructure, frontend, then the correlation agent — and validates the AgentCore prerequisites up front (via a new `check-agentcore-env` target) so it fails fast instead of after infra and frontend have already deployed. `make deploy` is unchanged (infra + frontend only) for users who do not want the agent.
+- **`deploy-agentcore` preflight reordered and rewritten.** It now checks for an active virtualenv **first** — the `agentcore` CLI ships inside the project venv, so "CLI not found" without a venv was misleading — then checks the CLI, each with actionable setup steps (`python3 -m venv .venv` → `source .venv/bin/activate` → `pip install bedrock-agentcore-starter-toolkit`). `docs/deploy.md` documents `make deploy-all` in the Makefile reference.
+
 ### Fix — Correlation agent returned nothing: ARN now resolved by stable name, owned by the stack
 
 - **Bug** — invoking the Git-Kiro correlation agent produced no result. The `kiro-cost-analyzer-correlation-worker` Lambda failed every invocation with `ResourceNotFoundException: No endpoint or agent found with qualifier 'DEFAULT' for agent '...runtime/GitCorrelationAgent-bnVS1RFwhi'`, and retried in a tight loop (~14 firings in ~40s) against an ARN that no longer existed. The AgentCore runtime had been recreated (new ID `...-nLdOow7N8j`), so no invocation ever reached it — its `otel-rt-logs` stream was empty.

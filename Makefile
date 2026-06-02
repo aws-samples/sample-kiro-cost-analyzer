@@ -26,10 +26,18 @@ endef
 # Targets principais
 # =============================================================================
 
-.PHONY: deploy deploy-infra deploy-frontend deploy-agentcore dev deploy-source-role deploy-identity-store-role
+.PHONY: deploy deploy-all deploy-infra deploy-frontend deploy-agentcore check-agentcore-env dev deploy-source-role deploy-identity-store-role
 
 ## Deploy completo: infraestrutura + frontend
 deploy: deploy-infra deploy-frontend
+
+## Full deploy including the optional Git-Kiro correlation agent
+## (infrastructure + frontend + AgentCore). Validates the agent prerequisites
+## up front so it fails fast instead of after infra/frontend already ran.
+## Use `make deploy` instead if you do not want the correlation agent.
+deploy-all: check-agentcore-env deploy-infra deploy-frontend deploy-agentcore
+	@echo ""
+	@echo "✅ Full deploy complete — infrastructure + frontend + correlation agent."
 
 ## Deploy da infraestrutura via SAM (build + deploy)
 ## O samconfig.toml já contém todos os parâmetros necessários
@@ -75,14 +83,31 @@ AGENTCORE_AGENT_NAME := GitCorrelationAgent
 # credential chain and can deploy into the wrong account.
 AGENTCORE_ENV := $(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE) ,)AWS_REGION=$(REGION) AWS_DEFAULT_REGION=$(REGION)
 
-deploy-agentcore:
-	@command -v agentcore >/dev/null 2>&1 || { echo "❌ agentcore CLI not found. Install with: pip install bedrock-agentcore-starter-toolkit"; exit 1; }
+## Preflight for the AgentCore deploy: the agentcore CLI ships inside the
+## project virtualenv, so check the venv FIRST (a missing venv is the usual
+## reason the CLI "isn't found"), then the CLI itself, with actionable steps.
+check-agentcore-env:
 	@if [ -z "$$VIRTUAL_ENV" ]; then \
-		echo "⚠️  No virtual environment detected (VIRTUAL_ENV is unset)."; \
-		echo "   The agentcore CLI and its dependencies may not be available."; \
-		echo "   Activate your venv first: source .venv/bin/activate"; \
+		echo "❌ No Python virtualenv is active (VIRTUAL_ENV is unset)."; \
+		echo "   The agentcore CLI is installed inside the project venv. Set it up:"; \
+		echo ""; \
+		echo "     python3 -m venv .venv"; \
+		echo "     source .venv/bin/activate"; \
+		echo "     pip install bedrock-agentcore-starter-toolkit"; \
+		echo ""; \
+		echo "   then re-run 'make deploy-agentcore'."; \
 		exit 1; \
 	fi
+	@command -v agentcore >/dev/null 2>&1 || { \
+		echo "❌ The 'agentcore' CLI is not on PATH, even though a venv is active."; \
+		echo "   Install it into the active venv:"; \
+		echo ""; \
+		echo "     pip install bedrock-agentcore-starter-toolkit"; \
+		echo ""; \
+		exit 1; \
+	}
+
+deploy-agentcore: check-agentcore-env
 	$(eval ACCOUNT_ID := $(shell aws sts get-caller-identity --query Account --output text $(PROFILE_FLAG)))
 	$(eval AGENT_ABS_DIR := $(shell cd $(AGENTCORE_AGENT_DIR) && pwd))
 	@echo "🔧 Generating .bedrock_agentcore.yaml for account $(ACCOUNT_ID) in $(REGION)..."

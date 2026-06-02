@@ -344,6 +344,7 @@ aws cloudformation describe-stacks \
 | Target | Description |
 |---|---|
 | `make deploy` | Full deploy (infra + frontend). Requires `samconfig.toml` (run `sam deploy --guided` once first). |
+| `make deploy-all` | `make deploy` plus the correlation agent (infra + frontend + AgentCore). Validates the agent prerequisites up front so it fails fast. |
 | `make deploy-infra` | `sam build` + `sam deploy` using `samconfig.toml`. |
 | `make deploy-frontend` | Build the SPA, sync to S3, invalidate CloudFront. |
 | `make deploy-agentcore` | Deploy the Git-Kiro Correlation Agent, then resolve its runtime ARN by name and sync it into the live stack. Needs the project venv active and a prior `make deploy-infra`. |
