@@ -57,14 +57,17 @@ Full component layout, the ETL and Git-Kiro correlation data flows, the DynamoDB
 - (Optional) IAM Identity Center ID for user-name resolution
 - An admin email address for the initial Cognito user
 - Bedrock model access enabled in the target region for Claude Haiku 4.5 and Claude Sonnet 4.6
+- (Cross-account only) a profile for the source account, and the source bucket's KMS key ARN if it is SSE-KMS — see the [deploy guide](docs/deploy.md#scenario-b--cross-account)
 
 ### Deploy
 
 ```bash
-# Full deploy (infrastructure + frontend)
-make deploy
+# First deploy — generates the gitignored samconfig.toml interactively.
+# Answer "yes" to "Save arguments to configuration file".
+sam build && sam deploy --guided
 
-# Or step by step
+# After the first deploy, samconfig.toml exists and the make targets work:
+make deploy            # Full deploy (infra + frontend)
 make deploy-infra      # SAM build + deploy
 make deploy-frontend   # Build + S3 sync + CloudFront invalidation
 
@@ -73,15 +76,18 @@ aws cloudformation describe-stacks --stack-name kiro-cost-analyzer \
   --query 'Stacks[0].StackStatus' --output text
 # Expected: CREATE_COMPLETE
 
-# Print the CloudFront URL
+# Print the CloudFront domain
 aws cloudformation describe-stacks --stack-name kiro-cost-analyzer \
-  --query "Stacks[0].Outputs[?OutputKey=='CloudFrontUrl'].OutputValue" --output text
+  --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDomainName'].OutputValue" --output text
 
 # Local development
 make dev
 ```
 
-Full deploy guide with cross-account setup: [docs/deploy.md](docs/deploy.md). Running cost estimates for light and heavy workloads: [docs/cost.md](docs/cost.md).
+Cross-account setups (source bucket or IAM Identity Center in another account)
+and the optional Git-Kiro correlation agent have their own steps — see the full
+[deploy guide](docs/deploy.md). Running cost estimates for light and heavy
+workloads: [docs/cost.md](docs/cost.md).
 
 ## Uninstall
 
@@ -111,7 +117,7 @@ cd agent/app/GitCorrelationAgent && agentcore delete --agent-name GitCorrelation
 
 # 6. (Optional) Delete the cross-account role stack in the source account
 aws cloudformation delete-stack \
-  --stack-name kiro-cost-analyzer-source-role \
+  --stack-name kiro-cross-account-role \
   --profile SOURCE_ACCOUNT_PROFILE
 
 # 7. (Optional) Delete the Identity Store role stack in the IDC account

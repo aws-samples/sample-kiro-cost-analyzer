@@ -99,7 +99,7 @@ File: screenshots/insights.png
 - **Cross-account Identity Center** — Resolves user names from IAM Identity Center in a separate account.
 - **Defense-in-depth** — Cognito + API Gateway authorizer + JWT claim scoping + CSP headers + CORS restriction.
 
-See [deploy.md](deploy.md#cross-account-access-optional) for the cross-account setup steps.
+See [deploy.md](deploy.md#scenario-b--cross-account) for the cross-account setup steps.
 
 ## Administration
 

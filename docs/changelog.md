@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+### Documentation — Deploy guide restructured by scenario
+
+- **`docs/deploy.md` rewritten** around the two real deployment topologies — *Scenario A (single account)* and *Scenario B (cross-account)* — each a complete, self-contained walkthrough instead of a single happy path plus an "optional" appendix. Establishes `sam deploy --guided` as the canonical first-run recipe that generates the gitignored `samconfig.toml` (after which the `make` targets work), and makes every raw `sam deploy` example complete with `--stack-name`, `--resolve-s3`, and `--capabilities`. Adds a callout distinguishing the `--stack-name` flag from the `StackName` template parameter. The cross-account flow now spells out the role-first ordering, a step to discover the source bucket's KMS key (`aws s3api get-bucket-encryption`), and `make deploy-agentcore` as an explicit step (same account as the app, project venv required). The Makefile-reference table now documents `KMS_KEY_ARN` as required for SSE-KMS source buckets (optional only for SSE-S3).
+- **README install section** now leads with `sam deploy --guided` for the first deploy, and adds a cross-account/KMS prerequisite pointer.
+- **Orphan reference fixes** — corrected the README CloudFront output query (`CloudFrontUrl` → `CloudFrontDomainName`, the actual stack output), the uninstall cross-account stack name (`kiro-cost-analyzer-source-role` → `kiro-cross-account-role`, the Makefile default), and the `docs/features.md` cross-account anchor.
+
 ### Fix — Clean-account provisioning for API Gateway and AgentCore
 
 - **API Gateway account-level CloudWatch role** — the prod stage enables `AccessLogSetting`, which requires an account/region-global API Gateway CloudWatch Logs role. The template assumed it already existed, so a first deploy into a fresh account failed with `CloudWatch Logs role ARN must be set in account settings to enable logging` (and rolled back). `template.yaml` now provisions `AWS::ApiGateway::Account` + an IAM role with `AmazonAPIGatewayPushToCloudWatchLogs`, and the API `DependsOn` it. Note: `AWS::ApiGateway::Account` is a per-account/region singleton — on an account that already has a role configured, the stack takes ownership of that setting.
