@@ -1,11 +1,60 @@
-"""Tests for etl.config module."""
+"""Tests for etl.config module.
+
+Config is read in a single batched ``ssm:GetParameters`` call and cached per
+warm container. Key behaviors under test:
+
+- Absent optional parameters (env var unset, or returned under
+  ``InvalidParameters``) resolve to "".
+- The ``"NONE"`` sentinel resolves to "".
+- A transient SSM error (throttling) raises from the batched call and
+  PROPAGATES — config must never silently degrade to single-account mode. This
+  is the fix for the intermittent cross-account AccessDenied caused by a
+  throttled role-arn read falling through to "".
+- The per-container cache returns the same object until ``reset_cache()``.
+"""
 
 import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from etl.config import EtlConfig, get_config
+from botocore.exceptions import ClientError
+
+from etl.config import EtlConfig, get_config, reset_cache
+
+ALL_ENV = {
+    "SSM_BUCKET_NAME": "/kiro-cost-analyzer/bucket-name",
+    "SSM_SOURCE_PREFIX": "/kiro-cost-analyzer/source-prefix",
+    "SSM_PROMPTS_PREFIX": "/kiro-cost-analyzer/prompts-prefix",
+    "SSM_IDENTITY_STORE_ID": "/kiro-cost-analyzer/identity-store-id",
+    "SSM_SOURCE_BUCKET_ROLE_ARN": "/kiro-cost-analyzer/source-bucket-role-arn",
+    "SSM_IDENTITY_STORE_ROLE_ARN": "/kiro-cost-analyzer/identity-store-role-arn",
+}
+
+REQUIRED_ENV = {
+    "SSM_BUCKET_NAME": "/kiro-cost-analyzer/bucket-name",
+    "SSM_SOURCE_PREFIX": "/kiro-cost-analyzer/source-prefix",
+}
+
+
+def _params(mapping: dict) -> dict:
+    """Build a GetParameters response from a {name: value} mapping."""
+    return {"Parameters": [{"Name": n, "Value": v} for n, v in mapping.items()]}
+
+
+def _throttling_error() -> ClientError:
+    return ClientError(
+        {"Error": {"Code": "ThrottlingException", "Message": "Rate exceeded"}},
+        "GetParameters",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _clear_config_cache():
+    """Isolate every test from the per-container config cache."""
+    reset_cache()
+    yield
+    reset_cache()
 
 
 class TestEtlConfig:
@@ -39,31 +88,24 @@ class TestEtlConfig:
 
 
 class TestGetConfig:
-    @patch.dict(os.environ, {
-        "SSM_BUCKET_NAME": "/kiro-cost-analyzer/bucket-name",
-        "SSM_SOURCE_PREFIX": "/kiro-cost-analyzer/source-prefix",
-        "SSM_PROMPTS_PREFIX": "/kiro-cost-analyzer/prompts-prefix",
-        "SSM_IDENTITY_STORE_ID": "/kiro-cost-analyzer/identity-store-id",
-        "SSM_SOURCE_BUCKET_ROLE_ARN": "/kiro-cost-analyzer/source-bucket-role-arn",
-        "SSM_IDENTITY_STORE_ROLE_ARN": "/kiro-cost-analyzer/identity-store-role-arn",
-    })
+    @patch.dict(os.environ, ALL_ENV, clear=True)
     @patch("etl.config.boto3")
     def test_reads_all_ssm_parameters(self, mock_boto3):
         mock_ssm = MagicMock()
         mock_boto3.client.return_value = mock_ssm
-        mock_ssm.get_parameter.side_effect = [
-            {"Parameter": {"Value": "my-source-bucket"}},
-            {"Parameter": {"Value": "activities/AWSLogs/123/KiroLogs/"}},
-            {"Parameter": {"Value": "prompts/AWSLogs/123/KiroLogs/"}},
-            {"Parameter": {"Value": "d-94671e1709"}},
-            {"Parameter": {"Value": "arn:aws:iam::111222333444:role/cross-account"}},
-            {"Parameter": {"Value": "arn:aws:iam::222333444555:role/idc-role"}},
-        ]
+        mock_ssm.get_parameters.return_value = _params({
+            ALL_ENV["SSM_BUCKET_NAME"]: "my-source-bucket",
+            ALL_ENV["SSM_SOURCE_PREFIX"]: "activities/AWSLogs/123/KiroLogs/",
+            ALL_ENV["SSM_PROMPTS_PREFIX"]: "prompts/AWSLogs/123/KiroLogs/",
+            ALL_ENV["SSM_IDENTITY_STORE_ID"]: "d-94671e1709",
+            ALL_ENV["SSM_SOURCE_BUCKET_ROLE_ARN"]: "arn:aws:iam::111222333444:role/cross-account",
+            ALL_ENV["SSM_IDENTITY_STORE_ROLE_ARN"]: "arn:aws:iam::222333444555:role/idc-role",
+        })
 
         cfg = get_config()
 
-        mock_boto3.client.assert_called_once_with("ssm")
-        assert mock_ssm.get_parameter.call_count == 6
+        # A single batched read regardless of how many parameters.
+        mock_ssm.get_parameters.assert_called_once()
         assert cfg.bucket_name == "my-source-bucket"
         assert cfg.source_prefix == "activities/AWSLogs/123/KiroLogs/"
         assert cfg.prompts_prefix == "prompts/AWSLogs/123/KiroLogs/"
@@ -71,18 +113,15 @@ class TestGetConfig:
         assert cfg.source_bucket_role_arn == "arn:aws:iam::111222333444:role/cross-account"
         assert cfg.identity_store_role_arn == "arn:aws:iam::222333444555:role/idc-role"
 
-    @patch.dict(os.environ, {
-        "SSM_BUCKET_NAME": "/kiro-cost-analyzer/bucket-name",
-        "SSM_SOURCE_PREFIX": "/kiro-cost-analyzer/source-prefix",
-    }, clear=True)
+    @patch.dict(os.environ, REQUIRED_ENV, clear=True)
     @patch("etl.config.boto3")
     def test_missing_optional_env_vars_returns_empty(self, mock_boto3):
         mock_ssm = MagicMock()
         mock_boto3.client.return_value = mock_ssm
-        mock_ssm.get_parameter.side_effect = [
-            {"Parameter": {"Value": "my-bucket"}},
-            {"Parameter": {"Value": "prefix/"}},
-        ]
+        mock_ssm.get_parameters.return_value = _params({
+            REQUIRED_ENV["SSM_BUCKET_NAME"]: "my-bucket",
+            REQUIRED_ENV["SSM_SOURCE_PREFIX"]: "prefix/",
+        })
 
         cfg = get_config()
 
@@ -92,28 +131,20 @@ class TestGetConfig:
         assert cfg.identity_store_id == ""
         assert cfg.source_bucket_role_arn == ""
         assert cfg.identity_store_role_arn == ""
-        assert mock_ssm.get_parameter.call_count == 2
 
-    @patch.dict(os.environ, {
-        "SSM_BUCKET_NAME": "/kiro-cost-analyzer/bucket-name",
-        "SSM_SOURCE_PREFIX": "/kiro-cost-analyzer/source-prefix",
-        "SSM_PROMPTS_PREFIX": "/kiro-cost-analyzer/prompts-prefix",
-        "SSM_IDENTITY_STORE_ID": "/kiro-cost-analyzer/identity-store-id",
-        "SSM_SOURCE_BUCKET_ROLE_ARN": "/kiro-cost-analyzer/source-bucket-role-arn",
-        "SSM_IDENTITY_STORE_ROLE_ARN": "/kiro-cost-analyzer/identity-store-role-arn",
-    })
+    @patch.dict(os.environ, ALL_ENV, clear=True)
     @patch("etl.config.boto3")
-    def test_ssm_error_on_optional_params_returns_empty(self, mock_boto3):
+    def test_absent_optional_params_resolve_empty(self, mock_boto3):
+        """Optional params returned under InvalidParameters (not present in
+        Parameters) resolve to "" — a genuinely absent parameter is not an
+        error."""
         mock_ssm = MagicMock()
         mock_boto3.client.return_value = mock_ssm
-        mock_ssm.get_parameter.side_effect = [
-            {"Parameter": {"Value": "my-bucket"}},
-            {"Parameter": {"Value": "prefix/"}},
-            Exception("ParameterNotFound"),
-            Exception("ParameterNotFound"),
-            Exception("ParameterNotFound"),
-            Exception("ParameterNotFound"),
-        ]
+        # Only the two required params come back; the rest are "absent".
+        mock_ssm.get_parameters.return_value = _params({
+            ALL_ENV["SSM_BUCKET_NAME"]: "my-bucket",
+            ALL_ENV["SSM_SOURCE_PREFIX"]: "prefix/",
+        })
 
         cfg = get_config()
 
@@ -123,122 +154,78 @@ class TestGetConfig:
         assert cfg.identity_store_id == ""
         assert cfg.source_bucket_role_arn == ""
         assert cfg.identity_store_role_arn == ""
+
+    @patch.dict(os.environ, ALL_ENV, clear=True)
+    @patch("etl.config.boto3")
+    def test_transient_ssm_error_propagates(self, mock_boto3):
+        """A throttling error must PROPAGATE, not degrade to single-account
+        mode. This is the regression guard for the intermittent cross-account
+        AccessDenied bug."""
+        mock_ssm = MagicMock()
+        mock_boto3.client.return_value = mock_ssm
+        mock_ssm.get_parameters.side_effect = _throttling_error()
+
+        with pytest.raises(ClientError):
+            get_config()
 
     def test_missing_required_env_var_raises(self):
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(KeyError):
                 get_config()
 
-
-class TestIdentityStoreRoleArn:
-    """Tests for the identity_store_role_arn SSM read (Requirements 2.1-2.4, 7.4)."""
-
-    @patch.dict(os.environ, {
-        "SSM_BUCKET_NAME": "/kiro-cost-analyzer/bucket-name",
-        "SSM_SOURCE_PREFIX": "/kiro-cost-analyzer/source-prefix",
-    }, clear=True)
+    @patch.dict(os.environ, ALL_ENV, clear=True)
     @patch("etl.config.boto3")
-    def test_env_var_unset_returns_empty(self, mock_boto3):
-        """Case 1: SSM_IDENTITY_STORE_ROLE_ARN unset → identity_store_role_arn == ""."""
+    def test_cache_returns_same_object(self, mock_boto3):
         mock_ssm = MagicMock()
         mock_boto3.client.return_value = mock_ssm
-        mock_ssm.get_parameter.side_effect = [
-            {"Parameter": {"Value": "my-bucket"}},
-            {"Parameter": {"Value": "prefix/"}},
-        ]
+        mock_ssm.get_parameters.return_value = _params({
+            ALL_ENV["SSM_BUCKET_NAME"]: "my-bucket",
+            ALL_ENV["SSM_SOURCE_PREFIX"]: "prefix/",
+        })
+
+        first = get_config()
+        second = get_config()
+
+        assert first is second
+        # Cached: SSM is read once across both calls.
+        mock_ssm.get_parameters.assert_called_once()
+
+
+class TestRoleArnResolution:
+    """The "NONE" sentinel and verbatim ARN handling for both role ARNs."""
+
+    @patch.dict(os.environ, ALL_ENV, clear=True)
+    @patch("etl.config.boto3")
+    def test_none_sentinel_resolves_empty(self, mock_boto3):
+        mock_ssm = MagicMock()
+        mock_boto3.client.return_value = mock_ssm
+        mock_ssm.get_parameters.return_value = _params({
+            ALL_ENV["SSM_BUCKET_NAME"]: "my-bucket",
+            ALL_ENV["SSM_SOURCE_PREFIX"]: "prefix/",
+            ALL_ENV["SSM_SOURCE_BUCKET_ROLE_ARN"]: "NONE",
+            ALL_ENV["SSM_IDENTITY_STORE_ROLE_ARN"]: "NONE",
+        })
 
         cfg = get_config()
 
-        assert cfg.identity_store_role_arn == ""
-        # Only the two required SSM reads occur; no read for identity_store_role_arn
-        assert mock_ssm.get_parameter.call_count == 2
-
-    @patch.dict(os.environ, {
-        "SSM_BUCKET_NAME": "/kiro-cost-analyzer/bucket-name",
-        "SSM_SOURCE_PREFIX": "/kiro-cost-analyzer/source-prefix",
-        "SSM_IDENTITY_STORE_ROLE_ARN": "/kiro-cost-analyzer/identity-store-role-arn",
-    }, clear=True)
-    @patch("etl.config.boto3")
-    def test_ssm_returns_empty_string(self, mock_boto3):
-        """Case 2: SSM returns "" → identity_store_role_arn == "".
-
-        An empty string is not the sentinel but should still resolve to "".
-        The current implementation maps only "NONE" → ""; an empty raw value
-        is returned as-is, which is already "". So the observable result is "".
-        """
-        mock_ssm = MagicMock()
-        mock_boto3.client.return_value = mock_ssm
-        mock_ssm.get_parameter.side_effect = [
-            {"Parameter": {"Value": "my-bucket"}},
-            {"Parameter": {"Value": "prefix/"}},
-            {"Parameter": {"Value": ""}},
-        ]
-
-        cfg = get_config()
-
+        assert cfg.source_bucket_role_arn == ""
         assert cfg.identity_store_role_arn == ""
 
-    @patch.dict(os.environ, {
-        "SSM_BUCKET_NAME": "/kiro-cost-analyzer/bucket-name",
-        "SSM_SOURCE_PREFIX": "/kiro-cost-analyzer/source-prefix",
-        "SSM_IDENTITY_STORE_ROLE_ARN": "/kiro-cost-analyzer/identity-store-role-arn",
-    }, clear=True)
+    @patch.dict(os.environ, ALL_ENV, clear=True)
     @patch("etl.config.boto3")
-    def test_ssm_returns_none_sentinel(self, mock_boto3):
-        """Case 3: SSM returns "NONE" → identity_store_role_arn == "" (Req 2.3)."""
+    def test_valid_arn_returned_verbatim(self, mock_boto3):
         mock_ssm = MagicMock()
         mock_boto3.client.return_value = mock_ssm
-        mock_ssm.get_parameter.side_effect = [
-            {"Parameter": {"Value": "my-bucket"}},
-            {"Parameter": {"Value": "prefix/"}},
-            {"Parameter": {"Value": "NONE"}},
-        ]
+        src = "arn:aws:iam::111222333444:role/kiro-cost-analyzer-cross-account-read"
+        idc = "arn:aws:iam::222222222222:role/kiro-cost-analyzer-identity-store-read"
+        mock_ssm.get_parameters.return_value = _params({
+            ALL_ENV["SSM_BUCKET_NAME"]: "my-bucket",
+            ALL_ENV["SSM_SOURCE_PREFIX"]: "prefix/",
+            ALL_ENV["SSM_SOURCE_BUCKET_ROLE_ARN"]: src,
+            ALL_ENV["SSM_IDENTITY_STORE_ROLE_ARN"]: idc,
+        })
 
         cfg = get_config()
 
-        assert cfg.identity_store_role_arn == ""
-
-    @patch.dict(os.environ, {
-        "SSM_BUCKET_NAME": "/kiro-cost-analyzer/bucket-name",
-        "SSM_SOURCE_PREFIX": "/kiro-cost-analyzer/source-prefix",
-        "SSM_IDENTITY_STORE_ROLE_ARN": "/kiro-cost-analyzer/identity-store-role-arn",
-    }, clear=True)
-    @patch("etl.config.boto3")
-    def test_ssm_returns_valid_arn(self, mock_boto3):
-        """Case 4: SSM returns a valid ARN → identity_store_role_arn equals it verbatim (Req 2.2)."""
-        mock_ssm = MagicMock()
-        mock_boto3.client.return_value = mock_ssm
-        arn = "arn:aws:iam::222222222222:role/kiro-cost-analyzer-identity-store-read"
-        mock_ssm.get_parameter.side_effect = [
-            {"Parameter": {"Value": "my-bucket"}},
-            {"Parameter": {"Value": "prefix/"}},
-            {"Parameter": {"Value": arn}},
-        ]
-
-        cfg = get_config()
-
-        assert cfg.identity_store_role_arn == arn
-
-    @patch.dict(os.environ, {
-        "SSM_BUCKET_NAME": "/kiro-cost-analyzer/bucket-name",
-        "SSM_SOURCE_PREFIX": "/kiro-cost-analyzer/source-prefix",
-        "SSM_IDENTITY_STORE_ROLE_ARN": "/kiro-cost-analyzer/identity-store-role-arn",
-    }, clear=True)
-    @patch("etl.config.boto3")
-    def test_ssm_get_parameter_raises_returns_empty(self, mock_boto3):
-        """Case 5: SSM get_parameter raises → identity_store_role_arn == "" and get_config() still returns (Req 2.4)."""
-        mock_ssm = MagicMock()
-        mock_boto3.client.return_value = mock_ssm
-        mock_ssm.get_parameter.side_effect = [
-            {"Parameter": {"Value": "my-bucket"}},
-            {"Parameter": {"Value": "prefix/"}},
-            Exception("ParameterNotFound"),
-        ]
-
-        cfg = get_config()
-
-        # get_config() returned successfully and populated the empty string
-        assert cfg.identity_store_role_arn == ""
-        # And the rest of the config is still correct
-        assert cfg.bucket_name == "my-bucket"
-        assert cfg.source_prefix == "prefix/"
+        assert cfg.source_bucket_role_arn == src
+        assert cfg.identity_store_role_arn == idc

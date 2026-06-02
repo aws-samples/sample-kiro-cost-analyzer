@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+### Fix — ETL cross-account reads no longer silently degrade under SSM throttling
+
+- **Bug** — during a high-concurrency ETL run (Distributed Map over 10k+ source files), some Parse invocations failed with `AccessDenied` on `s3:GetObject` against the cross-account source bucket, using the Lambda's *own* execution role instead of the configured cross-account role. Intermittent and silent — no error log pointed at the cause.
+- **Root cause** — `etl/config.py:get_config()` issued six separate `ssm:GetParameter` calls per invocation with no caching. Under Distributed Map concurrency this exceeded the SSM `GetParameter` throughput limit (measured ~63 TPS against a ~40 TPS default). The optional reads (including `source-bucket-role-arn`) were wrapped in a mute `except Exception: <field> = ""`, so a throttled role-ARN read resolved to an empty string. An empty ARN makes `get_s3_client` return `None`, and the readers fall back to a default S3 client (the Lambda role) — producing a cross-account `AccessDenied`. The required `bucket_name` read (no try/except) had already succeeded, so logs showed a populated bucket and masked the failure.
+- **Fix** — `get_config()` now performs a single batched `ssm:GetParameters` call, caches the result at module scope (one read per warm container instead of six per invocation), and uses an adaptive boto retry config. Transient SSM errors now propagate so Step Functions retries with backoff; the pipeline never degrades to single-account mode on a transient error. Genuinely absent optional parameters still resolve to `""`. `etl/parse_handler.py` no longer swallows config/AssumeRole errors — single-account fallback happens only when the role ARN is genuinely empty. The `parse` and `list-files` Lambda IAM policies in `template.yaml` gain `ssm:GetParameters` (a distinct action from `ssm:GetParameter`, required by the batched read).
+- **Tests** — `tests/test_etl_config.py` rewritten for the batched read, per-container cache, and the new error-propagation contract (throttling raises; absent params resolve to `""`). `tests/test_parse_handler.py` gains two regression guards: the cross-account client must be forwarded to `read_prompt_file` (never `None` when an ARN is configured), and a config-read failure must propagate.
+
 ### Security — Frontend dependency vulnerabilities resolved (`npm audit`: 0)
 
 - **Moderate (dev, non-breaking)** — bumped `brace-expansion` `5.0.5 → 5.0.6` (GHSA-jxxr-4gwj-5jf2, ReDoS-style resource consumption) and `postcss` `8.5.9 → 8.5.15` (GHSA-qx2v-qp2m-jg93, XSS via unescaped `</style>` in stringify output; pulls `nanoid 3.3.11 → 3.3.12`) via `npm audit fix`. Both are transitive dev dependencies (eslint / vite toolchain).

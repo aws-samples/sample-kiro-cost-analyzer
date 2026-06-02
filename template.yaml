@@ -876,6 +876,7 @@ Resources:
               Effect: Allow
               Action:
                 - ssm:GetParameter
+                - ssm:GetParameters
               Resource:
                 - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/kiro-cost-analyzer/*"
         - !If
@@ -953,6 +954,7 @@ Resources:
               Effect: Allow
               Action:
                 - ssm:GetParameter
+                - ssm:GetParameters
               Resource:
                 - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/kiro-cost-analyzer/*"
         - !If

@@ -85,25 +85,25 @@ def parse_handler(event, context):  # noqa: ARG001 - Lambda handler contract req
 
     logger = StructuredLogger("parse-lambda", correlation_id)
 
-    # Resolve config from SSM
-    try:
-        cfg = get_config()
-        source_prefix = cfg.source_prefix
-        prompts_prefix = cfg.prompts_prefix
-        identity_store_id = cfg.identity_store_id
-    except Exception:
-        source_prefix = ""
-        prompts_prefix = ""
-        identity_store_id = ""
+    # Resolve config from SSM. Do NOT swallow failures here: a throttled SSM
+    # read used to fall through to empty config, which made the cross-account
+    # S3 client silently become the Lambda's own role and produced intermittent
+    # cross-account AccessDenied at GetObject time. Let it raise so Step
+    # Functions retries the task with backoff.
+    cfg = get_config()
+    source_prefix = cfg.source_prefix
+    prompts_prefix = cfg.prompts_prefix
+    identity_store_id = cfg.identity_store_id
 
-    # Obtain cross-account S3 client if configured
-    try:
-        cross_account_client = get_s3_client(
-            cfg.source_bucket_role_arn,
-            correlation_id=correlation_id,
-        )
-    except Exception:
-        cross_account_client = None
+    # Obtain cross-account S3 client. get_s3_client returns None ONLY when no
+    # role ARN is configured (genuine single-account mode). An AssumeRole error
+    # propagates so Step Functions retries — we must never fall back to the
+    # Lambda's own role when a cross-account role IS configured, or we get a
+    # misleading cross-account AccessDenied on the source bucket.
+    cross_account_client = get_s3_client(
+        cfg.source_bucket_role_arn,
+        correlation_id=correlation_id,
+    )
 
     # Obtain cross-account Identity Store client if configured (Req 4.1, 4.2, 4.3)
     # Fall back to None on any construction error so cache-only resolution still
@@ -120,10 +120,7 @@ def parse_handler(event, context):  # noqa: ARG001 - Lambda handler contract req
 
     # Resolve bucket from config if not in event
     if not bucket:
-        try:
-            bucket = cfg.bucket_name
-        except Exception:
-            pass
+        bucket = cfg.bucket_name
 
     logger.info(
         "Starting parse",

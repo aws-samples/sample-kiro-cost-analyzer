@@ -93,11 +93,18 @@ class TestEnrichRecordsWithNames:
 
 class TestParseHandlerCsv:
     @patch.dict(os.environ, ENV_VARS)
+    @patch("etl.parse_handler.get_config")
+    @patch("etl.parse_handler.get_identity_store_client", return_value=None)
+    @patch("etl.parse_handler.get_s3_client", return_value=None)
     @patch("etl.parse_handler.resolve_names")
     @patch("etl.parse_handler.process_csv")
     @patch("etl.parse_handler.read_csv_content")
     @patch("etl.parse_handler.resolve_path_metadata")
-    def test_csv_happy_path(self, mock_resolve_path, mock_read, mock_process, mock_names):
+    def test_csv_happy_path(
+        self, mock_resolve_path, mock_read, mock_process, mock_names,
+        _mock_s3, _mock_idc, mock_get_config,
+    ):
+        mock_get_config.return_value = _make_cfg()
         mock_resolve_path.return_value = {"format_type": "new", "region": "us-east-1", "account_id": "123"}
         mock_read.return_value = "csv,content"
         mock_process.return_value = [
@@ -119,8 +126,14 @@ class TestParseHandlerCsv:
         mock_read.assert_called_once_with("my-bucket", event["key"], s3_client=None)
 
     @patch.dict(os.environ, ENV_VARS)
+    @patch("etl.parse_handler.get_config")
+    @patch("etl.parse_handler.get_identity_store_client", return_value=None)
+    @patch("etl.parse_handler.get_s3_client", return_value=None)
     @patch("etl.parse_handler.resolve_path_metadata")
-    def test_csv_unrecognised_path_returns_empty(self, mock_resolve_path):
+    def test_csv_unrecognised_path_returns_empty(
+        self, mock_resolve_path, _mock_s3, _mock_idc, mock_get_config,
+    ):
+        mock_get_config.return_value = _make_cfg()
         mock_resolve_path.return_value = None
 
         event = {
@@ -140,10 +153,16 @@ class TestParseHandlerCsv:
 
 class TestParseHandlerPrompt:
     @patch.dict(os.environ, ENV_VARS)
+    @patch("etl.parse_handler.get_config")
+    @patch("etl.parse_handler.get_identity_store_client", return_value=None)
+    @patch("etl.parse_handler.get_s3_client", return_value=None)
     @patch("etl.parse_handler.resolve_names")
     @patch("etl.parse_handler.process_prompts")
     @patch("etl.parse_handler.read_prompt_file")
-    def test_prompt_happy_path(self, mock_read, mock_process, mock_names):
+    def test_prompt_happy_path(
+        self, mock_read, mock_process, mock_names, _mock_s3, _mock_idc, mock_get_config,
+    ):
+        mock_get_config.return_value = _make_cfg()
         mock_read.return_value = b"\x1f\x8b..."
         mock_process.return_value = [
             {"userId": "u2", "requestId": "req-1", "displayName": "", "userName": ""},
@@ -162,6 +181,36 @@ class TestParseHandlerPrompt:
         assert result["recordCount"] == 1
         assert result["records"][0]["userName"] == "bob"
 
+    @patch.dict(os.environ, ENV_VARS)
+    @patch("etl.parse_handler.get_config")
+    @patch("etl.parse_handler.get_identity_store_client", return_value=None)
+    @patch("etl.parse_handler.get_s3_client")
+    @patch("etl.parse_handler.read_prompt_file")
+    def test_prompt_uses_cross_account_client(
+        self, mock_read, mock_get_s3, _mock_idc, mock_get_config,
+    ):
+        """Regression guard: when a source bucket role ARN is configured, the
+        cross-account client built by get_s3_client MUST be forwarded to
+        read_prompt_file — never None (which would use the Lambda's own role and
+        cause a cross-account AccessDenied)."""
+        role_arn = "arn:aws:iam::111222333444:role/kiro-cost-analyzer-cross-account-read"
+        mock_get_config.return_value = _make_cfg(source_bucket_role_arn=role_arn)
+        xa_client = MagicMock(name="cross-account-s3")
+        mock_get_s3.return_value = xa_client
+        mock_read.side_effect = Exception("stop after read")
+
+        event = {
+            "bucket": "my-bucket",
+            "key": "prompts/AWSLogs/673826570926/KiroLogs/GenerateAssistantResponse/us-east-1/2025/01/15/14/f.json.gz",
+            "fileType": "prompt",
+            "correlationId": "exec-xa",
+        }
+        with pytest.raises(Exception, match="stop after read"):
+            parse_handler(event, None)
+
+        mock_get_s3.assert_called_once_with(role_arn, correlation_id="exec-xa")
+        mock_read.assert_called_once_with("my-bucket", event["key"], s3_client=xa_client)
+
 
 # ---------------------------------------------------------------------------
 # parse_handler — Error handling
@@ -169,7 +218,11 @@ class TestParseHandlerPrompt:
 
 class TestParseHandlerErrors:
     @patch.dict(os.environ, ENV_VARS)
-    def test_unknown_file_type_raises(self):
+    @patch("etl.parse_handler.get_config")
+    @patch("etl.parse_handler.get_identity_store_client", return_value=None)
+    @patch("etl.parse_handler.get_s3_client", return_value=None)
+    def test_unknown_file_type_raises(self, _mock_s3, _mock_idc, mock_get_config):
+        mock_get_config.return_value = _make_cfg()
         event = {
             "bucket": "b",
             "key": "k",
@@ -180,9 +233,15 @@ class TestParseHandlerErrors:
             parse_handler(event, None)
 
     @patch.dict(os.environ, ENV_VARS)
+    @patch("etl.parse_handler.get_config")
+    @patch("etl.parse_handler.get_identity_store_client", return_value=None)
+    @patch("etl.parse_handler.get_s3_client", return_value=None)
     @patch("etl.parse_handler.read_csv_content", side_effect=Exception("S3 error"))
     @patch("etl.parse_handler.resolve_path_metadata", return_value={"format_type": "new"})
-    def test_s3_error_propagates(self, _mock_path, _mock_read):
+    def test_s3_error_propagates(
+        self, _mock_path, _mock_read, _mock_s3, _mock_idc, mock_get_config,
+    ):
+        mock_get_config.return_value = _make_cfg()
         event = {
             "bucket": "b",
             "key": "k",
@@ -190,6 +249,20 @@ class TestParseHandlerErrors:
             "correlationId": "",
         }
         with pytest.raises(Exception, match="S3 error"):
+            parse_handler(event, None)
+
+    @patch.dict(os.environ, ENV_VARS)
+    @patch("etl.parse_handler.get_config", side_effect=KeyError("SSM_BUCKET_NAME"))
+    def test_config_error_propagates(self, _mock_get_config):
+        """Regression guard: a config-read failure must propagate (Step Functions
+        retries) — it must NOT be swallowed into single-account mode."""
+        event = {
+            "bucket": "b",
+            "key": "k",
+            "fileType": "csv",
+            "correlationId": "",
+        }
+        with pytest.raises(KeyError):
             parse_handler(event, None)
 
 
