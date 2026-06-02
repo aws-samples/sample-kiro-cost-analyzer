@@ -79,7 +79,6 @@ Template parameters `--guided` asks for:
 
 | Parameter | Required | Value |
 |---|---|---|
-| `StackName` | yes | `kiro-cost-analyzer` (must match the stack name) |
 | `SourceBucketName` | yes | name of the S3 bucket with Kiro logs |
 | `AdminEmail` | yes | email for the first Cognito user |
 | `SourcePrefix` | no | CSV prefix, e.g. `activities/AWSLogs/<source-account-id>/KiroLogs/` |
@@ -88,11 +87,11 @@ Template parameters `--guided` asks for:
 | `SourceBucketRoleArn` | no | cross-account only — see [Scenario B](#scenario-b--cross-account) |
 | `IdentityStoreRoleArn` | no | cross-account only — see [Scenario B](#scenario-b--cross-account) |
 
-> **`--stack-name` vs `StackName`.** These are two different things with similar
-> names. `--stack-name` (a `sam`/CloudFormation flag) names the CloudFormation
-> stack; `StackName` (a template parameter) prefixes the names of resources the
-> stack creates. With `--guided` you set both through the prompts and never type
-> them again. If you ever run a raw `sam deploy` instead, you must pass **both**.
+> **`--stack-name`.** The stack name (set via the `--guided` prompt, or
+> `--stack-name` on a raw `sam deploy`) is also used to prefix the names of the
+> resources the stack creates, via the built-in `AWS::StackName` pseudo-parameter.
+> There is no separate `StackName` parameter to keep in sync — set the stack name
+> once.
 
 If you prefer a non-interactive first deploy, the complete raw command is:
 
@@ -104,7 +103,6 @@ sam deploy \
   --resolve-s3 \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
   --parameter-overrides \
-    StackName=kiro-cost-analyzer \
     SourceBucketName=YOUR-S3-BUCKET \
     SourcePrefix=activities/AWSLogs/ACCOUNT_ID/KiroLogs/ \
     PromptsPrefix=prompts/AWSLogs/ACCOUNT_ID/KiroLogs/ \
@@ -259,7 +257,6 @@ sam build && sam deploy \
   --resolve-s3 \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
   --parameter-overrides \
-    StackName=kiro-cost-analyzer \
     SourceBucketName=SOURCE-BUCKET \
     SourcePrefix=activities/AWSLogs/SOURCE_ACCOUNT_ID/KiroLogs/ \
     PromptsPrefix=prompts/AWSLogs/SOURCE_ACCOUNT_ID/KiroLogs/ \

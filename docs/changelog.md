@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Refactor — Drop the redundant `StackName` template parameter
+
+- `template.yaml` used a `StackName` parameter solely as a resource-name prefix (`!Sub "${StackName}-..."`, ~38 usages). That duplicated CloudFormation's built-in `AWS::StackName` pseudo-parameter and forced operators to pass the stack name twice (`--stack-name` *and* `StackName=`), which diverge silently if mistyped — the trap behind the earlier "Missing option --stack-name" confusion. All `${StackName}` references now use `${AWS::StackName}`, and the `StackName` parameter is removed from `Parameters`. Deploy examples in `docs/deploy.md` drop the `StackName=` override accordingly. Verified no-op via a no-execute changeset against the live stack: every resource reported `Replacement: False` (the resolved names are identical to the deployed stack, e.g. `kiro-cost-analyzer-analytics`).
+
 ### Documentation — Deploy guide restructured by scenario
 
 - **`docs/deploy.md` rewritten** around the two real deployment topologies — *Scenario A (single account)* and *Scenario B (cross-account)* — each a complete, self-contained walkthrough instead of a single happy path plus an "optional" appendix. Establishes `sam deploy --guided` as the canonical first-run recipe that generates the gitignored `samconfig.toml` (after which the `make` targets work), and makes every raw `sam deploy` example complete with `--stack-name`, `--resolve-s3`, and `--capabilities`. Adds a callout distinguishing the `--stack-name` flag from the `StackName` template parameter. The cross-account flow now spells out the role-first ordering, a step to discover the source bucket's KMS key (`aws s3api get-bucket-encryption`), and `make deploy-agentcore` as an explicit step (same account as the app, project venv required). The Makefile-reference table now documents `KMS_KEY_ARN` as required for SSE-KMS source buckets (optional only for SSE-S3).

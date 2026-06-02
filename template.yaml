@@ -3,9 +3,6 @@ Transform: AWS::Serverless-2016-10-31
 Description: Kiro Cost Analyzer — AWS Serverless Application Model (AWS SAM) template for Kiro usage analytics (v2)
 
 Parameters:
-  StackName:
-    Type: String
-    Description: CloudFormation stack name
   SourceBucketName:
     Type: String
     Description: S3 bucket name containing Kiro CSV activity logs
@@ -55,7 +52,7 @@ Resources:
   CognitoUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
-      UserPoolName: !Sub "${StackName}-user-pool"
+      UserPoolName: !Sub "${AWS::StackName}-user-pool"
       AutoVerifiedAttributes:
         - email
       UsernameAttributes:
@@ -82,7 +79,7 @@ Resources:
   CognitoUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
-      ClientName: !Sub "${StackName}-spa-client"
+      ClientName: !Sub "${AWS::StackName}-spa-client"
       UserPoolId: !Ref CognitoUserPool
       GenerateSecret: false
       ExplicitAuthFlows:
@@ -120,7 +117,7 @@ Resources:
   CognitoUserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
     Properties:
-      Domain: !Sub "${StackName}-${AWS::AccountId}"
+      Domain: !Sub "${AWS::StackName}-${AWS::AccountId}"
       UserPoolId: !Ref CognitoUserPool
 
   AdminGroup:
@@ -133,7 +130,7 @@ Resources:
   AdminUserCreatorFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${StackName}-admin-user-creator"
+      FunctionName: !Sub "${AWS::StackName}-admin-user-creator"
       Handler: admin_user_creator.lambda_handler
       CodeUri: custom_resources/
       Description: Custom Resource — creates initial admin user in Cognito
@@ -182,7 +179,7 @@ Resources:
           - id: "CKV_AWS_18"
             comment: "Terminal logging sink — cannot log to itself without circular dependency."
     Properties:
-      BucketName: !Sub "${StackName}-s3-access-logs-${AWS::AccountId}"
+      BucketName: !Sub "${AWS::StackName}-s3-access-logs-${AWS::AccountId}"
       ObjectLockEnabled: false
       OwnershipControls:
         Rules:
@@ -243,7 +240,7 @@ Resources:
           - S3_BUCKET_NO_PUBLIC_RW_ACL  # False positive — BucketOwnerPreferred required for log delivery; all PublicAccessBlock settings enabled
           - S3_BUCKET_SSL_REQUESTS_ONLY  # TLS enforced via separate LoggingBucketPolicy resource (DenyInsecureTransport); guard cannot correlate cross-resource policies
     Properties:
-      BucketName: !Sub "${StackName}-logs-${AWS::AccountId}"
+      BucketName: !Sub "${AWS::StackName}-logs-${AWS::AccountId}"
       ObjectLockEnabled: false
       OwnershipControls:
         Rules:
@@ -305,7 +302,7 @@ Resources:
           - S3_BUCKET_NO_PUBLIC_RW_ACL  # False positive — BucketOwnerPreferred required for log delivery; all PublicAccessBlock settings enabled
           - S3_BUCKET_SSL_REQUESTS_ONLY  # TLS enforced via separate DataBucketLoggingPolicy resource (DenyInsecureTransport); guard cannot correlate cross-resource policies
     Properties:
-      BucketName: !Sub "${StackName}-data-${AWS::AccountId}"
+      BucketName: !Sub "${AWS::StackName}-data-${AWS::AccountId}"
       ObjectLockEnabled: false
       OwnershipControls:
         Rules:
@@ -335,7 +332,7 @@ Resources:
           - S3_BUCKET_NO_PUBLIC_RW_ACL  # False positive — BucketOwnerPreferred required for log delivery; all PublicAccessBlock settings enabled
           - S3_BUCKET_SSL_REQUESTS_ONLY  # TLS enforced via separate WebsiteBucketPolicy resource (DenyInsecureTransport); guard cannot correlate cross-resource policies
     Properties:
-      BucketName: !Sub "${StackName}-website-${AWS::AccountId}"
+      BucketName: !Sub "${AWS::StackName}-website-${AWS::AccountId}"
       ObjectLockEnabled: false
       BucketEncryption:
         ServerSideEncryptionConfiguration:
@@ -359,7 +356,7 @@ Resources:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
       OriginAccessControlConfig:
-        Name: !Sub "${StackName}-oac"
+        Name: !Sub "${AWS::StackName}-oac"
         Description: OAC for WebsiteBucket access
         SigningProtocol: sigv4
         SigningBehavior: always
@@ -369,7 +366,7 @@ Resources:
     Type: AWS::CloudFront::ResponseHeadersPolicy
     Properties:
       ResponseHeadersPolicyConfig:
-        Name: !Sub "${StackName}-security-headers"
+        Name: !Sub "${AWS::StackName}-security-headers"
         Comment: Security headers for KCA SPA
         SecurityHeadersConfig:
           ContentSecurityPolicy:
@@ -510,7 +507,7 @@ Resources:
   KCAEncryptionKey:
     Type: AWS::KMS::Key
     Properties:
-      Description: !Sub "Encryption key for ${StackName} DynamoDB tables and CloudWatch Logs"
+      Description: !Sub "Encryption key for ${AWS::StackName} DynamoDB tables and CloudWatch Logs"
       EnableKeyRotation: true
       KeyPolicy:
         Version: "2012-10-17"
@@ -553,7 +550,7 @@ Resources:
   KCAEncryptionKeyAlias:
     Type: AWS::KMS::Alias
     Properties:
-      AliasName: !Sub "alias/${StackName}-encryption"
+      AliasName: !Sub "alias/${AWS::StackName}-encryption"
       TargetKeyId: !Ref KCAEncryptionKey
 
   # ============================================================
@@ -563,7 +560,7 @@ Resources:
   ProcessedFilesTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub "${StackName}-processed-files"
+      TableName: !Sub "${AWS::StackName}-processed-files"
       BillingMode: PAY_PER_REQUEST
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
@@ -581,7 +578,7 @@ Resources:
   UserNamesTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub "${StackName}-user-names"
+      TableName: !Sub "${AWS::StackName}-user-names"
       BillingMode: PAY_PER_REQUEST
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
@@ -599,7 +596,7 @@ Resources:
   FeedbackTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub "${StackName}-feedback"
+      TableName: !Sub "${AWS::StackName}-feedback"
       BillingMode: PAY_PER_REQUEST
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
@@ -621,7 +618,7 @@ Resources:
   AnalyticsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub "${StackName}-analytics"
+      TableName: !Sub "${AWS::StackName}-analytics"
       BillingMode: PAY_PER_REQUEST
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
@@ -721,7 +718,7 @@ Resources:
     # "CloudWatch Logs role ARN must be set in account settings to enable logging".
     DependsOn: ApiGatewayAccount
     Properties:
-      Name: !Sub "${StackName}-api"
+      Name: !Sub "${AWS::StackName}-api"
       StageName: prod
       TracingEnabled: true
       AccessLogSetting:
@@ -741,7 +738,7 @@ Resources:
   ApiGatewayAccessLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub "/aws/apigateway/${StackName}-api-access-logs"
+      LogGroupName: !Sub "/aws/apigateway/${AWS::StackName}-api-access-logs"
       RetentionInDays: 90
       KmsKeyId: !GetAtt KCAEncryptionKey.Arn
 
@@ -761,7 +758,7 @@ Resources:
   ApiGatewayCloudWatchRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "${StackName}-apigw-cloudwatch"
+      RoleName: !Sub "${AWS::StackName}-apigw-cloudwatch"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -784,7 +781,7 @@ Resources:
     Type: AWS::XRay::SamplingRule
     Properties:
       SamplingRule:
-        RuleName: !Sub "${StackName}-5pct"
+        RuleName: !Sub "${AWS::StackName}-5pct"
         Priority: 100
         FixedRate: 0.05
         ReservoirSize: 1
@@ -802,7 +799,7 @@ Resources:
   SharedLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
-      LayerName: !Sub "${StackName}-shared"
+      LayerName: !Sub "${AWS::StackName}-shared"
       Description: Shared code — shared utils, git_shared (git_repository)
       ContentUri: layers/shared/
       CompatibleRuntimes:
@@ -819,7 +816,7 @@ Resources:
   PromptCategorizerGuardrail:
     Type: AWS::Bedrock::Guardrail
     Properties:
-      Name: !Sub "${StackName}-prompt-categorizer"
+      Name: !Sub "${AWS::StackName}-prompt-categorizer"
       Description: "Guardrail for KCA prompt categorization — filters harmful content, prompt injection, and PII before sending to Bedrock"
       BlockedInputMessaging: "Content blocked by guardrail — prompt contains disallowed content."
       BlockedOutputsMessaging: "Response blocked by guardrail."
@@ -873,7 +870,7 @@ Resources:
   ListFilesFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${StackName}-list-files"
+      FunctionName: !Sub "${AWS::StackName}-list-files"
       Handler: list_handler.list_handler
       CodeUri: etl/
       Description: ETL pipeline — lists new S3 files not yet processed
@@ -932,7 +929,7 @@ Resources:
   ParseFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${StackName}-parse"
+      FunctionName: !Sub "${AWS::StackName}-parse"
       Handler: parse_handler.parse_handler
       CodeUri: etl/
       Description: ETL pipeline — reads S3 file, parses, normalizes and resolves user names
@@ -1020,7 +1017,7 @@ Resources:
   WriterFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${StackName}-writer"
+      FunctionName: !Sub "${AWS::StackName}-writer"
       Handler: writer_handler.writer_handler
       CodeUri: etl/
       Description: ETL pipeline — writes parsed records to DynamoDB and S3
@@ -1066,7 +1063,7 @@ Resources:
   RecordStatusFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${StackName}-record-status"
+      FunctionName: !Sub "${AWS::StackName}-record-status"
       Handler: record_status_handler.record_status_handler
       CodeUri: etl/
       Description: ETL pipeline — records execution summary to SSM Parameter Store
@@ -1097,7 +1094,7 @@ Resources:
   ReconcileUsersFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${StackName}-reconcile-users"
+      FunctionName: !Sub "${AWS::StackName}-reconcile-users"
       Handler: reconcile_users_handler.reconcile_users_handler
       CodeUri: etl/
       Description: ETL pipeline — reconciles UserNamesTable against IAM Identity Center
@@ -1137,7 +1134,7 @@ Resources:
   ListUncategorizedFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${StackName}-list-uncategorized"
+      FunctionName: !Sub "${AWS::StackName}-list-uncategorized"
       Handler: list_uncategorized_handler.list_uncategorized_handler
       CodeUri: etl/
       Description: ETL pipeline — lists prompts with category NOT_CATEGORIZED
@@ -1175,7 +1172,7 @@ Resources:
   CategorizePromptFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${StackName}-categorize-prompt"
+      FunctionName: !Sub "${AWS::StackName}-categorize-prompt"
       Handler: categorize_prompt_handler.categorize_prompt_handler
       CodeUri: etl/
       Description: ETL pipeline — categorizes a single prompt using Amazon Bedrock Claude Haiku 4.5
@@ -1250,7 +1247,7 @@ Resources:
   EtlStateMachine:
     Type: AWS::Serverless::StateMachine
     Properties:
-      Name: !Sub "${StackName}-etl-state-machine"
+      Name: !Sub "${AWS::StackName}-etl-state-machine"
       Type: STANDARD
       Tracing:
         Enabled: true
@@ -1547,8 +1544,8 @@ Resources:
                 - states:DescribeExecution
                 - states:StopExecution
               Resource:
-                - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${StackName}-etl-state-machine"
-                - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:${StackName}-etl-state-machine/*"
+                - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-etl-state-machine"
+                - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:${AWS::StackName}-etl-state-machine/*"
             - Sid: DistributedMapResultWriter
               Effect: Allow
               Action:
@@ -1568,7 +1565,7 @@ Resources:
   BackendFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${StackName}-backend"
+      FunctionName: !Sub "${AWS::StackName}-backend"
       Handler: handler.lambda_handler
       CodeUri: backend/
       Description: API backend — serves data via DynamoDB, manages config and users
@@ -1961,7 +1958,7 @@ Resources:
   CorrelationWorkerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${StackName}-correlation-worker"
+      FunctionName: !Sub "${AWS::StackName}-correlation-worker"
       Handler: handlers.correlation_worker.lambda_handler
       CodeUri: backend/
       Description: Async worker — invokes AgentCore for correlation analysis
@@ -2024,7 +2021,7 @@ Resources:
   AgentCoreExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "${StackName}-agentcore-execution"
+      RoleName: !Sub "${AWS::StackName}-agentcore-execution"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -2045,7 +2042,7 @@ Resources:
   AgentCoreRuntimeBasePolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
-      ManagedPolicyName: !Sub "${StackName}-agentcore-runtime-base"
+      ManagedPolicyName: !Sub "${AWS::StackName}-agentcore-runtime-base"
       Description: Base permissions for Amazon Bedrock AgentCore runtime (logs, tracing, model invocation)
       PolicyDocument:
         Version: "2012-10-17"
@@ -2091,7 +2088,7 @@ Resources:
   AgentCoreAppPermissionsPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
-      ManagedPolicyName: !Sub "${StackName}-agentcore-app-permissions"
+      ManagedPolicyName: !Sub "${AWS::StackName}-agentcore-app-permissions"
       Description: Application permissions for GitCorrelationAgent (SSM, KMS, DynamoDB)
       PolicyDocument:
         Version: "2012-10-17"
@@ -2141,7 +2138,7 @@ Outputs:
     Value: !Ref CognitoUserPoolClient
   CognitoDomain:
     Description: Cognito Hosted UI domain
-    Value: !Sub "${StackName}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
+    Value: !Sub "${AWS::StackName}-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
   DataBucketName:
     Description: S3 bucket for Parquet data
     Value: !Ref DataBucket
