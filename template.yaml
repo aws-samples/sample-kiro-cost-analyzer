@@ -713,6 +713,13 @@ Resources:
   # ============================================================
   ApiGateway:
     Type: AWS::Serverless::Api
+    # The prod stage enables CloudWatch access logging (AccessLogSetting below),
+    # which requires an account-level API Gateway CloudWatch Logs role. That
+    # role is a one-per-account/region global setting, so we create it here and
+    # force the API (and therefore its stage) to wait for it. Without this,
+    # deploying into an account that has never configured the role fails with
+    # "CloudWatch Logs role ARN must be set in account settings to enable logging".
+    DependsOn: ApiGatewayAccount
     Properties:
       Name: !Sub "${StackName}-api"
       StageName: prod
@@ -737,6 +744,38 @@ Resources:
       LogGroupName: !Sub "/aws/apigateway/${StackName}-api-access-logs"
       RetentionInDays: 90
       KmsKeyId: !GetAtt KCAEncryptionKey.Arn
+
+  # ============================================================
+  # API Gateway account-level CloudWatch Logs role
+  # ------------------------------------------------------------
+  # API Gateway requires an account/region-global IAM role to push access and
+  # execution logs to CloudWatch. This is configured once per account+region
+  # (AWS::ApiGateway::Account). The sample provisions it so a clean account
+  # deploys without manual `apigateway update-account` setup.
+  #
+  # NOTE: AWS::ApiGateway::Account is a singleton per account+region. If the
+  # target account already has a CloudWatch Logs role configured, deploying
+  # this stack will overwrite that account-level setting with this role, and
+  # deleting the stack will clear it. On a dedicated app account (the assumed
+  # deployment model) this is the desired behavior.
+  ApiGatewayCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${StackName}-apigw-cloudwatch"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+
+  ApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiGatewayCloudWatchRole.Arn
 
   # ============================================================
   # X-Ray Sampling Rule — limit tracing to 5% of requests

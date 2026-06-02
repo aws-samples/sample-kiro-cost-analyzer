@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+### Fix — Clean-account provisioning for API Gateway and AgentCore
+
+- **API Gateway account-level CloudWatch role** — the prod stage enables `AccessLogSetting`, which requires an account/region-global API Gateway CloudWatch Logs role. The template assumed it already existed, so a first deploy into a fresh account failed with `CloudWatch Logs role ARN must be set in account settings to enable logging` (and rolled back). `template.yaml` now provisions `AWS::ApiGateway::Account` + an IAM role with `AmazonAPIGatewayPushToCloudWatchLogs`, and the API `DependsOn` it. Note: `AWS::ApiGateway::Account` is a per-account/region singleton — on an account that already has a role configured, the stack takes ownership of that setting.
+- **AgentCore deploy targets the right account** — `make deploy-agentcore` resolved the account with the configured profile but invoked the `agentcore` CLI without it, so the CLI used the default credential chain and could deploy into the wrong account. The Makefile now prefixes the `agentcore deploy` call with `AWS_PROFILE`/`AWS_REGION`/`AWS_DEFAULT_REGION` and echoes the target account/region.
+- **AgentCore config no longer ships a stale agent identity** — the versioned `.bedrock_agentcore.yaml.template` hard-coded a specific `agent_id`/`agent_arn` from a previous deployment, so a fresh `agentcore deploy` attempted `UpdateAgentRuntime` on a non-existent runtime and failed with `ResourceNotFoundException`. Both fields are now `null` so the toolkit creates a new runtime. `s3_auto_create` flipped to `true` so the AgentCore sources bucket is created on first deploy instead of failing with `NoSuchBucket` on a clean account.
+
 ### Fix — ETL cross-account reads no longer silently degrade under SSM throttling
 
 - **Bug** — during a high-concurrency ETL run (Distributed Map over 10k+ source files), some Parse invocations failed with `AccessDenied` on `s3:GetObject` against the cross-account source bucket, using the Lambda's *own* execution role instead of the configured cross-account role. Intermittent and silent — no error log pointed at the cause.

@@ -64,6 +64,11 @@ deploy-frontend:
 ## Generates .bedrock_agentcore.yaml from template with real account data, then deploys.
 AGENTCORE_AGENT_DIR := agent/app/GitCorrelationAgent
 
+# Env prefix so the agentcore CLI (boto3-based) targets the same account/region
+# as the rest of the deploy. Without this the CLI falls back to the default
+# credential chain and can deploy into the wrong account.
+AGENTCORE_ENV := $(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE) ,)AWS_REGION=$(REGION) AWS_DEFAULT_REGION=$(REGION)
+
 deploy-agentcore:
 	@command -v agentcore >/dev/null 2>&1 || { echo "❌ agentcore CLI not found. Install with: pip install bedrock-agentcore-starter-toolkit"; exit 1; }
 	@if [ -z "$$VIRTUAL_ENV" ]; then \
@@ -80,8 +85,8 @@ deploy-agentcore:
 	     -e 's|__AGENT_DIR__|$(AGENT_ABS_DIR)|g' \
 	     -e 's|__STACK_NAME__|$(STACK_NAME)|g' \
 	     $(AGENTCORE_AGENT_DIR)/.bedrock_agentcore.yaml.template > $(AGENTCORE_AGENT_DIR)/.bedrock_agentcore.yaml
-	@echo "🤖 Deploying GitCorrelationAgent to Bedrock AgentCore..."
-	cd $(AGENTCORE_AGENT_DIR) && agentcore deploy --auto-update-on-conflict
+	@echo "🤖 Deploying GitCorrelationAgent to Bedrock AgentCore (account $(ACCOUNT_ID), region $(REGION))..."
+	cd $(AGENTCORE_AGENT_DIR) && $(AGENTCORE_ENV) agentcore deploy --auto-update-on-conflict
 	@echo "✅ Agent deployed to AgentCore!"
 
 ## Inicia o servidor de desenvolvimento local do frontend

@@ -18,7 +18,7 @@ agents:
       ecr_repository: null
       ecr_auto_create: false
       s3_path: s3://bedrock-agentcore-codebuild-sources-__ACCOUNT_ID__-__REGION__
-      s3_auto_create: false
+      s3_auto_create: true
       network_configuration:
         network_mode: PUBLIC
         network_mode_config: null
@@ -30,8 +30,8 @@ agents:
         idle_runtime_session_timeout: null
         max_lifetime: null
     bedrock_agentcore:
-      agent_id: GitCorrelationAgent-bnVS1RFwhi
-      agent_arn: arn:aws:bedrock-agentcore:__REGION__:__ACCOUNT_ID__:runtime/GitCorrelationAgent-bnVS1RFwhi
+      agent_id: null
+      agent_arn: null
       agent_session_id: null
     codebuild:
       project_name: null
