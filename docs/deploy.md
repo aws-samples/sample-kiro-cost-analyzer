@@ -281,7 +281,9 @@ sam build && sam deploy \
 ### 4. Frontend and agent
 
 Same as the single-account flow — run `make deploy-frontend AWS_PROFILE=app-profile`
-and (optionally) `make deploy-agentcore AWS_PROFILE=app-profile`.
+and (optionally) `make deploy-agentcore AWS_PROFILE=app-profile` (after the
+stack exists, so the ARN sync in step 3 has its target parameter). See
+[step 3 of Scenario A](#3-deploy-the-correlation-agent-optional) for details.
 
 ### Rollback to single-account
 
@@ -344,7 +346,7 @@ aws cloudformation describe-stacks \
 | `make deploy` | Full deploy (infra + frontend). Requires `samconfig.toml` (run `sam deploy --guided` once first). |
 | `make deploy-infra` | `sam build` + `sam deploy` using `samconfig.toml`. |
 | `make deploy-frontend` | Build the SPA, sync to S3, invalidate CloudFront. |
-| `make deploy-agentcore` | Deploy the Git-Kiro Correlation Agent (needs the project venv active). |
+| `make deploy-agentcore` | Deploy the Git-Kiro Correlation Agent, then resolve its runtime ARN by name and sync it into the live stack. Needs the project venv active and a prior `make deploy-infra`. |
 | `make deploy-source-role` | Cross-account S3 read role, deployed in the source account. |
 | `make deploy-identity-store-role` | Cross-account Identity Center read role, deployed in the IDC account. |
 | `make reingest-data` | Start a fresh ETL execution. |
