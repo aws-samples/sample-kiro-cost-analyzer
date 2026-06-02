@@ -33,6 +33,10 @@ Parameters:
     Type: String
     Default: ""
     Description: "IAM Role ARN in the IAM Identity Center account for cross-account Identity Store access (empty = single-account)"
+  CorrelationAgentRuntimeArn:
+    Type: String
+    Default: "NONE"
+    Description: "ARN of the GitCorrelationAgent Bedrock AgentCore runtime. Resolved by name and written into the stack by 'make deploy-agentcore'. Stays 'NONE' until the agent is deployed, in which case the correlation worker returns a clean error instead of invoking a non-existent runtime."
 
 Globals:
   Function:
@@ -1591,7 +1595,7 @@ Resources:
           USER_NAMES_TABLE: !Ref UserNamesTable
           FEEDBACK_TABLE: !Ref FeedbackTable
           ETL_SCHEDULE_NAME: !Ref EtlStateMachineEtlSchedule
-          AGENT_RUNTIME_ARN: !Sub "arn:aws:bedrock-agentcore:sa-east-1:${AWS::AccountId}:runtime/GitCorrelationAgent-bnVS1RFwhi"
+          CORRELATION_AGENT_RUNTIME_ARN: !Ref CorrelationAgentRuntimeArn
           CORRELATION_WORKER_ARN: !GetAtt CorrelationWorkerFunction.Arn
       Events:
         MeGet:
@@ -1969,7 +1973,7 @@ Resources:
       Environment:
         Variables:
           ANALYTICS_TABLE: !Ref AnalyticsTable
-          AGENT_RUNTIME_ARN: !Sub "arn:aws:bedrock-agentcore:sa-east-1:${AWS::AccountId}:runtime/GitCorrelationAgent-bnVS1RFwhi"
+          CORRELATION_AGENT_RUNTIME_ARN: !Ref CorrelationAgentRuntimeArn
       Policies:
         - Statement:
             - Sid: AnalyticsTableAccess
@@ -2157,3 +2161,6 @@ Outputs:
   AgentCoreExecutionRoleArn:
     Description: IAM Role ARN for the AgentCore GitCorrelationAgent
     Value: !GetAtt AgentCoreExecutionRole.Arn
+  AgentRuntimeArn:
+    Description: ARN of the GitCorrelationAgent AgentCore runtime currently wired into the correlation worker ("NONE" until 'make deploy-agentcore' runs)
+    Value: !Ref CorrelationAgentRuntimeArn

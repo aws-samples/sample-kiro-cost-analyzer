@@ -64,6 +64,12 @@ deploy-frontend:
 ## Generates .bedrock_agentcore.yaml from template with real account data, then deploys.
 AGENTCORE_AGENT_DIR := agent/app/GitCorrelationAgent
 
+# Stable identity of the runtime. The AgentCore-generated runtime ID carries a
+# volatile 10-char suffix (e.g. GitCorrelationAgent-nLdOow7N8j) that changes
+# whenever the toolkit recreates the runtime. The NAME is the only stable,
+# cross-account identifier, so we resolve the ARN by name after every deploy.
+AGENTCORE_AGENT_NAME := GitCorrelationAgent
+
 # Env prefix so the agentcore CLI (boto3-based) targets the same account/region
 # as the rest of the deploy. Without this the CLI falls back to the default
 # credential chain and can deploy into the wrong account.
@@ -88,6 +94,50 @@ deploy-agentcore:
 	@echo "🤖 Deploying GitCorrelationAgent to Bedrock AgentCore (account $(ACCOUNT_ID), region $(REGION))..."
 	cd $(AGENTCORE_AGENT_DIR) && $(AGENTCORE_ENV) agentcore deploy --auto-update-on-conflict
 	@echo "✅ Agent deployed to AgentCore!"
+	@echo "🔗 Resolving runtime ARN by name and syncing it into stack $(STACK_NAME)..."
+	@set -e; \
+	ARN=$$(aws bedrock-agentcore-control list-agent-runtimes \
+		--region $(REGION) $(PROFILE_FLAG) \
+		--query "agentRuntimes[?agentRuntimeName=='$(AGENTCORE_AGENT_NAME)'].agentRuntimeArn | [0]" \
+		--output text); \
+	if [ -z "$$ARN" ] || [ "$$ARN" = "None" ]; then \
+		echo "❌ Could not find an AgentCore runtime named '$(AGENTCORE_AGENT_NAME)' in $(REGION)."; \
+		echo "   The agent deploy above may have failed — check its output."; \
+		exit 1; \
+	fi; \
+	echo "   Resolved: $$ARN"; \
+	KEYS=$$(aws cloudformation describe-stacks --stack-name $(STACK_NAME) \
+		--region $(REGION) $(PROFILE_FLAG) \
+		--query "Stacks[0].Parameters[].ParameterKey" --output text); \
+	if ! echo "$$KEYS" | tr '\t' '\n' | grep -qx CorrelationAgentRuntimeArn; then \
+		echo "❌ Stack $(STACK_NAME) has no CorrelationAgentRuntimeArn parameter yet."; \
+		echo "   Run 'make deploy-infra' first so the template that defines it is live."; \
+		exit 1; \
+	fi; \
+	PARAMS=""; \
+	for k in $$KEYS; do \
+		if [ "$$k" = "CorrelationAgentRuntimeArn" ]; then \
+			PARAMS="$$PARAMS ParameterKey=$$k,ParameterValue=$$ARN"; \
+		else \
+			PARAMS="$$PARAMS ParameterKey=$$k,UsePreviousValue=true"; \
+		fi; \
+	done; \
+	echo "🚀 Updating stack (CorrelationAgentRuntimeArn only, all other params preserved)..."; \
+	if OUT=$$(aws cloudformation update-stack --stack-name $(STACK_NAME) \
+			--region $(REGION) $(PROFILE_FLAG) \
+			--use-previous-template \
+			--capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+			--parameters $$PARAMS 2>&1); then \
+		echo "⏳ Waiting for stack update to complete..."; \
+		aws cloudformation wait stack-update-complete --stack-name $(STACK_NAME) \
+			--region $(REGION) $(PROFILE_FLAG); \
+		echo "✅ Correlation worker now points at $$ARN"; \
+	elif echo "$$OUT" | grep -q "No updates are to be performed"; then \
+		echo "✅ Stack already points at $$ARN — nothing to update."; \
+	else \
+		echo "$$OUT"; \
+		exit 1; \
+	fi
 
 ## Inicia o servidor de desenvolvimento local do frontend
 dev:

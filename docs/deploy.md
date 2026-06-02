@@ -153,6 +153,12 @@ The Git-Kiro correlation feature runs on Amazon Bedrock AgentCore. It is a
 separate deploy from the SAM stack and goes into the **same account** as the app
 (its execution role and DynamoDB/SSM access live there).
 
+Run it **after** `make deploy-infra` — the SAM stack defines the
+`CorrelationAgentRuntimeArn` parameter that this step populates. The target
+resolves the runtime ARN by its stable name (`GitCorrelationAgent`) and syncs it
+into the live stack, so the correlation worker always points at the current
+runtime even after the AgentCore toolkit recreates it with a new ID.
+
 ```bash
 # The agentcore CLI lives in the project's virtualenv — activate it first.
 python3 -m venv .venv && source .venv/bin/activate
@@ -163,7 +169,9 @@ make deploy-agentcore AWS_PROFILE=my-profile
 ```
 
 Skip this step if you do not need Git-Kiro correlation; the rest of the app
-works without it.
+works without it. Until you run it, `CorrelationAgentRuntimeArn` stays `"NONE"`
+and the correlation worker returns a clean error instead of invoking a
+non-existent runtime.
 
 ### 4. Run the ETL
 

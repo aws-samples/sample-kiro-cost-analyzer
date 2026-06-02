@@ -128,7 +128,17 @@ def _invoke_agent(
     Returns:
         Parsed analysis result dict.
     """
-    agent_runtime_arn = os.environ.get("AGENT_RUNTIME_ARN", "")
+    agent_runtime_arn = os.environ.get("CORRELATION_AGENT_RUNTIME_ARN", "")
+
+    # The ARN is "NONE" (the template default) until `make deploy-agentcore`
+    # resolves the runtime by name and writes it into the stack. Fail fast with
+    # a clear signal instead of calling InvokeAgentRuntime with an unusable ARN,
+    # which would surface as an opaque ValidationException/ResourceNotFound.
+    if not agent_runtime_arn or agent_runtime_arn == "NONE":
+        raise RuntimeError(
+            "CORRELATION_AGENT_RUNTIME_ARN is not configured (agent not deployed). "
+            "Run 'make deploy-agentcore' to provision the runtime and wire its ARN."
+        )
 
     payload = {
         "userId": user_id,

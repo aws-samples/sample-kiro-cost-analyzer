@@ -15,7 +15,7 @@ from handlers.correlation_worker import lambda_handler, _clear_pending_flag, _co
 @pytest.fixture
 def mock_env(monkeypatch):
     monkeypatch.setenv("ANALYTICS_TABLE", "test-analytics")
-    monkeypatch.setenv("AGENT_RUNTIME_ARN", "arn:aws:bedrock-agentcore:sa-east-1:123456789012:runtime/TestAgent")
+    monkeypatch.setenv("CORRELATION_AGENT_RUNTIME_ARN", "arn:aws:bedrock-agentcore:sa-east-1:123456789012:runtime/TestAgent")
 
 
 @pytest.fixture
@@ -63,6 +63,35 @@ class TestWorkerLambda:
             assert result["status"] == "completed"
             assert result["userId"] == "user1"
             mock_repo.put_analysis.assert_called_once()
+            mock_table.delete_item.assert_called_once_with(
+                Key={"PK": "USER#user1", "SK": "ANALYSIS_PENDING"}
+            )
+
+    def test_unconfigured_runtime_arn_fails_clean(self, monkeypatch, worker_event):
+        """When CORRELATION_AGENT_RUNTIME_ARN is the 'NONE' placeholder (agent not
+        yet deployed), the worker must NOT call AgentCore — it fails fast, logs,
+        and still clears the pending flag. Guards the regression where the worker
+        invoked a stale/non-existent runtime ARN.
+        """
+        monkeypatch.setenv("ANALYTICS_TABLE", "test-analytics")
+        monkeypatch.setenv("CORRELATION_AGENT_RUNTIME_ARN", "NONE")
+
+        with patch("handlers.correlation_worker.boto3.resource") as mock_resource, \
+             patch("handlers.correlation_worker.boto3.client") as mock_client, \
+             patch("handlers.correlation_worker.AnalyticsRepository") as MockRepo:
+
+            mock_table = MagicMock()
+            mock_dynamo = MagicMock()
+            mock_dynamo.Table.return_value = mock_table
+            mock_resource.return_value = mock_dynamo
+
+            result = lambda_handler(worker_event, None)
+
+            assert result["status"] == "completed"
+            # AgentCore must never be invoked when the ARN is unconfigured.
+            mock_client.assert_not_called()
+            MockRepo.return_value.put_analysis.assert_not_called()
+            # Pending flag is still cleared so the UI doesn't hang on "processing".
             mock_table.delete_item.assert_called_once_with(
                 Key={"PK": "USER#user1", "SK": "ANALYSIS_PENDING"}
             )
