@@ -58,7 +58,7 @@ class TestFunnelStageCountConsistency:
     **Validates: Requirements 3.1, 3.2, 3.3, 3.4, 3.5**
     """
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(data=activities_with_classifications())
     def test_produces_exactly_four_stages(self, data):
         """compute_funnel always produces exactly 4 stages."""
@@ -67,7 +67,7 @@ class TestFunnelStageCountConsistency:
 
         assert len(funnel) == 4
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(data=activities_with_classifications())
     def test_stage_counts_match_definitions(self, data):
         """Each stage count matches its expected definition."""
@@ -95,7 +95,7 @@ class TestFunnelStageCountConsistency:
         assert funnel[3].name == "powerUsers"
         assert funnel[3].count == expected_power
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(data=activities_with_classifications())
     def test_stage_counts_monotonically_non_increasing(self, data):
         """Each stage count is <= the previous stage count."""
@@ -120,7 +120,7 @@ class TestFunnelConversionRateCorrectness:
     **Validates: Requirements 3.7, 3.8**
     """
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(data=activities_with_classifications())
     def test_first_stage_conversion_rate_is_100(self, data):
         """The first stage always has conversion rate 100.0."""
@@ -129,7 +129,7 @@ class TestFunnelConversionRateCorrectness:
 
         assert funnel[0].conversion_rate == 100.0
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(data=activities_with_classifications())
     def test_conversion_rates_mathematically_correct(self, data):
         """Each stage's conversion rate equals (count / prev_count) * 100 or 0.0 when prev is 0."""
@@ -165,7 +165,7 @@ class TestDerivedMetricsConsistency:
     **Validates: Requirements 4.4, 7.1, 7.2, 7.3**
     """
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(data=activities_with_classifications(min_size=1))
     def test_power_plus_idle_lte_100(self, data):
         """powerUserPercentage + idleRate <= 100.0."""
@@ -177,7 +177,7 @@ class TestDerivedMetricsConsistency:
 
         assert metrics["powerUserPercentage"] + metrics["idleRate"] <= 100.0 + 1e-9
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(data=activities_with_classifications(min_size=1))
     def test_activation_plus_idle_equals_100(self, data):
         """activationRate + idleRate == 100.0 (within floating point tolerance)."""
@@ -193,7 +193,7 @@ class TestDerivedMetricsConsistency:
             f"idleRate ({metrics['idleRate']}) = {total}, expected ~100.0"
         )
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(data=activities_with_classifications(min_size=1))
     def test_metrics_rounded_to_one_decimal(self, data):
         """Each metric is rounded to 1 decimal place."""

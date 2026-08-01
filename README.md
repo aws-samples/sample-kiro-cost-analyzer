@@ -39,7 +39,7 @@ See [docs/features.md](docs/features.md) for the full walkthrough with screensho
 
 ## Architecture
 
-![Architecture diagram showing the frontend React SPA connecting to Amazon API Gateway and AWS Lambda backend, which integrates with Amazon DynamoDB, Amazon S3, Amazon Cognito, and a Git-Kiro Correlation Agent using Amazon Bedrock AgentCore and Claude Sonnet 4.6](docs/architecture.png)
+![Architecture diagram showing the frontend React SPA connecting to Amazon API Gateway and AWS Lambda backend, which integrates with Amazon DynamoDB, Amazon S3, Amazon Cognito, and a Git-Kiro Correlation Agent using Amazon Bedrock AgentCore and Claude Sonnet 4.6 with GitHub and GitLab tools](docs/architecture.png)
 
 Full component layout, the ETL and Git-Kiro correlation data flows, the DynamoDB schema, and the design decisions behind them live in [docs/architecture.md](docs/architecture.md).
 
@@ -58,6 +58,7 @@ Full component layout, the ETL and Git-Kiro correlation data flows, the DynamoDB
 - An admin email address for the initial Cognito user
 - Bedrock model access enabled in the target region for Claude Haiku 4.5 and Claude Sonnet 4.6
 - (Cross-account only) a profile for the source account, and the source bucket's KMS key ARN if it is SSE-KMS — see the [deploy guide](docs/deploy.md#scenario-b--cross-account)
+- (If using the optional GitLab integration) network reachability and certificate trust between the AgentCore runtime and your GitLab instance, plus a one-time cold-window note on the deploy that runs the mapping migration — see [GitLab integration prerequisites](docs/deploy.md#gitlab-integration-prerequisites)
 
 ### Deploy
 
@@ -144,7 +145,7 @@ End-to-end patterns you can lift into your own work:
 
 - A serverless ingestion pipeline using **AWS Step Functions** with a **Distributed Map Express** child workflow to fan out file processing without hitting Map Inline limits.
 - **Amazon DynamoDB single-table design** with atomic counters, sort-key normalization, and hybrid storage (large items offloaded to Amazon S3).
-- **Amazon Bedrock AgentCore** orchestrating two MCP tools (GitHub via OAuth, Kiro data via Lambda) for on-demand semantic correlation.
+- **Amazon Bedrock AgentCore** orchestrating provider-aware Git tools (GitHub via OAuth through the AgentCore Gateway, GitLab via a direct authenticated HTTPS call) alongside a Kiro data tool via Lambda, for on-demand semantic correlation across GitHub and GitLab repositories.
 - A **Cognito-fronted React SPA** with Cloudscape, full i18n via `react-i18next`, and locale-aware formatters.
 - **Cross-account access patterns** for Amazon S3 source buckets and IAM Identity Center via AWS STS AssumeRole.
 - A formal **STRIDE threat model** with the corresponding mitigations applied in `template.yaml` and the sample code — see [docs/security.md](docs/security.md).

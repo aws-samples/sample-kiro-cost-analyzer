@@ -12,9 +12,9 @@ This sample applies defense-in-depth controls aligned with a STRIDE threat model
 | CORS | Restricted to CloudFront domain (no wildcard) |
 | CSP | Content-Security-Policy, HSTS, X-Frame-Options: DENY via CloudFront |
 | Token security | 1h ID/access token, 7-day refresh token, GlobalSignOut on logout |
-| Secrets | Git PATs in SSM SecureString (KMS), never exposed in API responses |
+| Secrets | Git PATs (GitHub and GitLab) in SSM SecureString (KMS), never exposed in API responses |
 | Identity bridging | Cognito sub ↔ Kiro userId linked via custom attribute |
-| Encryption | S3 AES-256 at rest, all connections TLS in transit |
+| Encryption | S3 AES-256 at rest. All AWS-managed connections use TLS in transit. The agent-to-GitLab connection follows the scheme configured for the GitLab instance (`https` recommended; `http` supported for a self-hosted instance served over plain HTTP per Requirement 10.3). Certificate verification is enabled by default when `https` is used. **`GITLAB_SSL_VERIFY=false` disables it and MUST NOT be used in production** — see [TLS certificate trust](deploy.md#tls-certificate-trust). The agent-to-GitHub connection is always `https`, with certificate verification always enabled (no opt-out exists for GitHub). |
 
 ## Threat model
 

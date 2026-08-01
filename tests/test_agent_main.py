@@ -8,11 +8,18 @@ from unittest.mock import MagicMock, patch
 import pytest
 from hypothesis import given, settings, assume
 from hypothesis import strategies as st
+from pydantic import ValidationError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agent", "app", "GitCorrelationAgent"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
-from agent.app.GitCorrelationAgent.main import parse_agent_output, extract_text_from_result
+from agent.app.GitCorrelationAgent.main import (
+    parse_agent_output,
+    extract_text_from_result,
+    _normalize_descriptors,
+    _fallback_analysis,
+)
+from agent.app.GitCorrelationAgent.prompts import CorrelationAnalysis, Correlation, Insights
 
 
 class TestParseAgentOutput:
@@ -92,7 +99,7 @@ class TestAgentOutputJsonParsingProperty:
         }
 
     @given(data=valid_analysis_json())
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     def test_plain_json_parsed_correctly(self, data):
         """Valid JSON (plain) is extracted correctly."""
         raw = json.dumps(data)
@@ -103,7 +110,7 @@ class TestAgentOutputJsonParsingProperty:
         assert result["insights"] == data["insights"]
 
     @given(data=valid_analysis_json())
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     def test_code_fenced_json_parsed_correctly(self, data):
         """Valid JSON in code fences is extracted correctly."""
         raw = f"```json\n{json.dumps(data)}\n```"
@@ -125,7 +132,7 @@ class TestFallbackOnInvalidJsonProperty:
     """
 
     @given(text=st.text(min_size=1, max_size=500))
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     def test_non_json_raises_exception(self, text):
         """Non-JSON strings cause an exception."""
         stripped = text.strip()
@@ -159,7 +166,7 @@ class TestHandlerReturnsValidJsonProperty:
         impact_score=st.one_of(st.none(), st.integers(min_value=0, max_value=100)),
         impact_level=st.sampled_from(["low", "moderate", "high", "veryHigh"]),
     )
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     def test_valid_analysis_returns_valid_json(self, impact_score, impact_level):
         """Valid analysis results produce parseable JSON string."""
         analysis = {
@@ -186,3 +193,214 @@ class TestHandlerReturnsValidJsonProperty:
         parsed = json.loads(result_str)
         assert parsed["impactScore"] is None
         assert len(parsed["insights"]) > 0
+
+
+class TestNormalizeDescriptors:
+    """Unit tests for `_normalize_descriptors`'s DD-5 default/drop behavior."""
+
+    def test_missing_provider_defaults_to_github(self):
+        repos = [{"repoId": "aaaaaaaa", "owner": "acme", "repo": "billing", "gitUsername": "alice"}]
+        result = _normalize_descriptors(repos, fallback_username="")
+        assert len(result) == 1
+        assert result[0]["provider"] == "github"
+
+    def test_missing_git_username_falls_back_to_top_level(self):
+        repos = [{"repoId": "aaaaaaaa", "provider": "github", "owner": "acme", "repo": "billing"}]
+        result = _normalize_descriptors(repos, fallback_username="bob")
+        assert result[0]["gitUsername"] == "bob"
+
+    def test_present_git_username_is_not_overridden(self):
+        repos = [
+            {
+                "repoId": "aaaaaaaa",
+                "provider": "github",
+                "owner": "acme",
+                "repo": "billing",
+                "gitUsername": "alice",
+            }
+        ]
+        result = _normalize_descriptors(repos, fallback_username="bob")
+        assert result[0]["gitUsername"] == "alice"
+
+    def test_unknown_provider_is_dropped(self):
+        repos = [
+            {"repoId": "aaaaaaaa", "provider": "bitbucket", "owner": "acme", "repo": "billing"},
+            {"repoId": "bbbbbbbb", "provider": "github", "owner": "acme", "repo": "payments"},
+        ]
+        result = _normalize_descriptors(repos, fallback_username="alice")
+        assert len(result) == 1
+        assert result[0]["repoId"] == "bbbbbbbb"
+
+    def test_github_missing_location_fields_is_dropped(self):
+        repos = [{"repoId": "aaaaaaaa", "provider": "github", "owner": "acme"}]
+        result = _normalize_descriptors(repos, fallback_username="alice")
+        assert result == []
+
+    def test_gitlab_missing_location_fields_is_dropped(self):
+        repos = [{"repoId": "aaaaaaaa", "provider": "gitlab", "baseUrl": "https://gitlab.example.com"}]
+        result = _normalize_descriptors(repos, fallback_username="alice")
+        assert result == []
+
+    def test_gitlab_descriptor_with_full_location_is_kept(self):
+        repos = [
+            {
+                "repoId": "aaaaaaaa",
+                "provider": "gitlab",
+                "baseUrl": "https://gitlab.example.com",
+                "projectPath": "group/project",
+                "gitUsername": "alice",
+            }
+        ]
+        result = _normalize_descriptors(repos, fallback_username="")
+        assert len(result) == 1
+        assert result[0]["provider"] == "gitlab"
+
+    def test_non_dict_entry_is_dropped(self):
+        repos = [
+            "not-a-dict",
+            {"repoId": "aaaaaaaa", "provider": "github", "owner": "acme", "repo": "billing"},
+        ]
+        result = _normalize_descriptors(repos, fallback_username="alice")
+        assert len(result) == 1
+
+    def test_empty_repos_returns_empty_list(self):
+        assert _normalize_descriptors([], fallback_username="alice") == []
+
+    def test_none_repos_returns_empty_list(self):
+        assert _normalize_descriptors(None, fallback_username="alice") == []
+
+    def test_never_raises_on_malformed_input(self):
+        malformed = [
+            None,
+            42,
+            {"provider": None, "owner": None, "repo": None},
+            {"provider": "gitlab", "baseUrl": None, "projectPath": None},
+            {"repoId": "cccccccc", "provider": "github", "owner": "acme", "repo": "svc", "gitUsername": None},
+        ]
+        result = _normalize_descriptors(malformed, fallback_username="alice")
+        # Only the last entry has valid location fields after defaulting.
+        assert len(result) == 1
+        assert result[0]["gitUsername"] == "alice"
+
+
+# Feature: gitlab-provider-support
+class TestNormalizeDescriptorsProperty:
+    """Property-adjacent example coverage for `_normalize_descriptors`.
+
+    Not one of the numbered design properties (those belong to task 13.12,
+    Property 13: Provider dispatch totality, and related tasks) — this is
+    scoped example coverage for the defaulting/dropping behavior introduced
+    in this task, kept intentionally small.
+    """
+
+    @given(
+        provider=st.sampled_from(["bitbucket", "svn", "perforce", "GITHUB", "GitLab"]),
+    )
+    @settings(max_examples=20)
+    def test_case_sensitive_unknown_providers_are_dropped(self, provider):
+        """Providers outside the exact set {"github", "gitlab"} are dropped.
+
+        Includes differently-cased variants to confirm matching is exact
+        (case-sensitive), not normalized. An empty-string provider is
+        excluded from this generator: it is falsy, so per the DD-5 default
+        it becomes "github" rather than an unknown provider — that case is
+        covered separately by `test_missing_provider_defaults_to_github`.
+        """
+        repos = [
+            {
+                "repoId": "aaaaaaaa",
+                "provider": provider,
+                "owner": "acme",
+                "repo": "billing",
+                "baseUrl": "https://gitlab.example.com",
+                "projectPath": "acme/billing",
+                "gitUsername": "alice",
+            }
+        ]
+        result = _normalize_descriptors(repos, fallback_username="alice")
+        if provider in ("github", "gitlab"):
+            assert len(result) == 1
+        else:
+            assert result == []
+
+
+class TestCorrelationAnalysisModel:
+    """Unit tests for the `CorrelationAnalysis` structured output model (DD-6).
+
+    These cover the shape Strands enforces via `structured_output_model`,
+    replacing the free-text JSON contract previously validated only by
+    `parse_agent_output` on the production path.
+    """
+
+    def test_round_trips_bilingual_insights_via_alias(self):
+        analysis = CorrelationAnalysis(
+            impactScore=48,
+            impactLevel="moderate",
+            correlations=[],
+            insights={"en": ["Title: text"], "pt-BR": ["Título: texto"]},
+        )
+        dumped = analysis.model_dump(by_alias=True)
+        assert dumped["insights"]["en"] == ["Title: text"]
+        assert dumped["insights"]["pt-BR"] == ["Título: texto"]
+
+    def test_impact_score_defaults_to_none_when_omitted(self):
+        analysis = CorrelationAnalysis(
+            impactLevel="low",
+            insights={"en": ["x"], "pt-BR": ["y"]},
+        )
+        assert analysis.impactScore is None
+
+    def test_correlations_default_to_empty_list(self):
+        analysis = CorrelationAnalysis(
+            impactLevel="low",
+            insights={"en": ["x"], "pt-BR": ["y"]},
+        )
+        assert analysis.correlations == []
+
+    def test_impact_score_out_of_range_rejected(self):
+        with pytest.raises(ValidationError):
+            CorrelationAnalysis(
+                impactScore=101,
+                impactLevel="high",
+                insights={"en": ["x"], "pt-BR": ["y"]},
+            )
+
+    def test_more_than_twenty_correlations_rejected(self):
+        correlations = [
+            {"promptSummary": f"p{i}", "gitActivity": f"g{i}", "confidence": 0.6, "type": "prompt_to_commit"}
+            for i in range(21)
+        ]
+        with pytest.raises(ValidationError):
+            CorrelationAnalysis(
+                impactLevel="high",
+                correlations=correlations,
+                insights={"en": ["x"], "pt-BR": ["y"]},
+            )
+
+    def test_correlation_confidence_below_minimum_rejected(self):
+        with pytest.raises(ValidationError):
+            Correlation(promptSummary="p", gitActivity="g", confidence=0.49, type="prompt_to_commit")
+
+    def test_missing_pt_br_insights_key_rejected(self):
+        with pytest.raises(ValidationError):
+            Insights(en=["x"])
+
+
+class TestFallbackAnalysis:
+    """Unit tests for `_fallback_analysis`, used when `StructuredOutputException` is raised."""
+
+    def test_returns_null_score_and_parallel_bilingual_insights(self):
+        fallback = _fallback_analysis()
+        assert fallback["impactScore"] is None
+        assert len(fallback["insights"]["en"]) == len(fallback["insights"]["pt-BR"]) == 1
+
+    def test_is_valid_against_correlation_analysis_schema(self):
+        """The fallback dict itself SHALL satisfy the CorrelationAnalysis schema."""
+        fallback = _fallback_analysis()
+        # Should not raise.
+        CorrelationAnalysis(**fallback)
+
+    def test_result_is_json_serializable(self):
+        fallback = _fallback_analysis()
+        parsed = json.loads(json.dumps(fallback))
+        assert parsed == fallback

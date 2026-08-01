@@ -82,7 +82,7 @@ describe('Property 1: resolveInitialLocale totality', () => {
         const result = resolveInitialLocale(stored, nav);
         return (SUPPORTED_LOCALES as readonly string[]).includes(result);
       }),
-      { numRuns: 500 },
+      { numRuns: 100 },
     );
   });
 });

@@ -13,10 +13,16 @@ from datetime import datetime, timezone
 
 import boto3
 from boto3.dynamodb.conditions import Key
-from repository.git_repository import GitRepository
-from shared.structured_logger import StructuredLogger
 
-SUPPORTED_PROVIDERS = frozenset({"github"})
+try:
+    from git_shared.git_repository import GitRepository
+except ImportError:
+    from layers.shared.git_shared.git_repository import GitRepository
+try:
+    from git_shared.git_providers import SUPPORTED_PROVIDERS
+except ImportError:
+    from layers.shared.git_shared.git_providers import SUPPORTED_PROVIDERS
+from shared.structured_logger import StructuredLogger
 
 
 logger = StructuredLogger("git-mapping-handler")
@@ -124,7 +130,9 @@ def handle_create_mapping(
         "createdBy": created_by,
     }
 
-    repo.put_user_mapping(user_id, mapping)
+    stored, previous = repo.put_user_mapping(user_id, mapping)
+    replaced = previous is not None
+    previous_git_username = previous.get("gitUsername") if previous else None
 
     logger.info(
         "Git user mapping created",
@@ -132,6 +140,8 @@ def handle_create_mapping(
         provider=provider,
         gitUsername=git_username,
         createdBy=created_by,
+        replaced=replaced,
+        previousGitUsername=previous_git_username,
     )
 
     return {
@@ -139,6 +149,8 @@ def handle_create_mapping(
         "provider": provider,
         "gitUsername": git_username,
         "createdAt": created_at,
+        "replaced": replaced,
+        "previousGitUsername": previous_git_username,
         "_status_code": 201,
     }
 
@@ -182,33 +194,34 @@ def handle_list_mappings(
 def handle_delete_mapping(
     user_id: str,
     provider: str,
-    git_username: str,
     dynamodb_resource=None,
 ) -> dict:
-    """Handle DELETE /api/git/mappings/{userId}/{provider}/{gitUsername}.
+    """Handle DELETE /api/git/mappings/{userId}/{provider}.
 
     Args:
         user_id: Kiro user identifier.
         provider: Git provider name.
-        git_username: Git username to unmap.
         dynamodb_resource: Optional boto3 DynamoDB resource (for testing).
 
     Returns:
-        Success dict, or error dict with ``_status_code``.
+        Success dict. Always reports ``deleted: True`` — a delete of an
+        absent mapping succeeds the same as a delete of an existing one,
+        which is what makes repeated deletion idempotent.
     """
     table_name = os.environ.get("ANALYTICS_TABLE", "Analytics_Table")
     repo = GitRepository(table_name, dynamodb_resource=dynamodb_resource)
 
     # Delete the mapping (DynamoDB delete is idempotent)
-    repo.delete_user_mapping(user_id, provider, git_username)
+    repo.delete_user_mapping(user_id, provider)
 
     logger.info(
         "Git user mapping deleted",
         userId=user_id,
         provider=provider,
-        gitUsername=git_username,
     )
 
     return {
-        "message": f"Mapping {provider}/{git_username} removed for user {user_id}",
+        "userId": user_id,
+        "provider": provider,
+        "deleted": True,
     }

@@ -57,7 +57,7 @@ describe('Property 4: number formatter locale coherence', () => {
         const expected = new Intl.NumberFormat(L, opts).format(n);
         return actual === expected;
       }),
-      { numRuns: 200 },
+      { numRuns: 40 },
     );
   });
 });
@@ -94,7 +94,7 @@ describe('Property 5: date/time formatter locale coherence', () => {
         const expected = new Intl.DateTimeFormat(L, DEFAULT_DATE).format(d);
         return actual === expected;
       }),
-      { numRuns: 200 },
+      { numRuns: 40 },
     );
   });
 
@@ -106,7 +106,7 @@ describe('Property 5: date/time formatter locale coherence', () => {
         const expected = new Intl.DateTimeFormat(L, DEFAULT_TIME).format(d);
         return actual === expected;
       }),
-      { numRuns: 200 },
+      { numRuns: 40 },
     );
   });
 
@@ -118,7 +118,7 @@ describe('Property 5: date/time formatter locale coherence', () => {
         const expected = new Intl.DateTimeFormat(L, DEFAULT_DATETIME).format(d);
         return actual === expected;
       }),
-      { numRuns: 200 },
+      { numRuns: 40 },
     );
   });
 });

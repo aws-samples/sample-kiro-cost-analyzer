@@ -55,7 +55,7 @@ _PROMPT_DETAIL_PATTERN = re.compile(r"^/api/prompts/([^/]+)$")
 # Git endpoint patterns
 _GIT_REPO_SYNC_PATTERN = re.compile(r"^/api/git/repos/([^/]+)/sync$")
 _GIT_REPO_DETAIL_PATTERN = re.compile(r"^/api/git/repos/([^/]+)$")
-_GIT_MAPPING_DELETE_PATTERN = re.compile(r"^/api/git/mappings/([^/]+)/([^/]+)/([^/]+)$")
+_GIT_MAPPING_DELETE_PATTERN = re.compile(r"^/api/git/mappings/([^/]+)/([^/]+)$")
 _GIT_MAPPING_USER_PATTERN = re.compile(r"^/api/git/mappings/([^/]+)$")
 
 _THROTTLE_ERROR_CODES = frozenset({
@@ -614,7 +614,7 @@ def _route(http_method: str, path: str, query_params: dict, body: dict, claims: 
             result = git_mapping_handler.handle_list_mappings(user_id)
             return _build_response(200, result)
 
-    # DELETE /api/git/mappings/{userId}/{provider}/{gitUsername}
+    # DELETE /api/git/mappings/{userId}/{provider}
     if http_method == "DELETE":
         match = _GIT_MAPPING_DELETE_PATTERN.match(path)
         if match:
@@ -625,8 +625,7 @@ def _route(http_method: str, path: str, query_params: dict, body: dict, claims: 
                 })
             user_id = match.group(1)
             provider = match.group(2)
-            git_username = match.group(3)
-            result = git_mapping_handler.handle_delete_mapping(user_id, provider, git_username)
+            result = git_mapping_handler.handle_delete_mapping(user_id, provider)
             return _build_response(200, result)
 
     # --- Unknown route ---

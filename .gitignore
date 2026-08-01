@@ -65,6 +65,9 @@ frontend/public/icons.svg
 CLAUDE.md
 .tmp-issues/
 
+# Holmes MCP local scan metadata
+.holmes/
+
 # draw.io editor backups
 *.drawio.bkp
 .$*.drawio.bkp

@@ -13,7 +13,15 @@ import uuid
 from datetime import datetime, timezone
 
 import boto3
-from repository.git_repository import GitRepository
+
+try:
+    from git_shared.git_repository import GitRepository
+except ImportError:
+    from layers.shared.git_shared.git_repository import GitRepository
+try:
+    from git_shared.git_providers import SUPPORTED_PROVIDERS
+except ImportError:
+    from layers.shared.git_shared.git_providers import SUPPORTED_PROVIDERS
 from shared.structured_logger import StructuredLogger
 
 
@@ -21,8 +29,6 @@ logger = StructuredLogger("git-repo-handler")
 
 _SSM_TOKEN_PATH_PREFIX = "/kiro-cost-analyzer/git-tokens"  # noqa: S105 — SSM path prefix, not a secret
 _URL_PATTERN = re.compile(r"^https?://[^\s/$.?#].[^\s]*$", re.IGNORECASE)
-
-SUPPORTED_PROVIDERS = frozenset({"github"})
 
 
 def _validate_url(url: str) -> bool:
@@ -89,7 +95,7 @@ def handle_create_repo(
     if provider not in SUPPORTED_PROVIDERS:
         return {
             "error": "ValidationError",
-            "message": f"Unsupported provider: {provider}. Only GitHub is supported.",
+            "message": f"Unsupported provider: {provider}. Valid providers: {', '.join(sorted(SUPPORTED_PROVIDERS))}",
             "_status_code": 400,
         }
 

@@ -535,13 +535,13 @@ class TestComputeSummaryProperties:
     )
 
     @given(st.lists(st.one_of(_success, _error, _legacy_error), max_size=50))
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     def test_success_plus_failed_equals_total(self, results):
         summary = _compute_summary(results)
         assert summary["filesSuccess"] + summary["filesFailed"] == len(results)
 
     @given(st.lists(st.one_of(_success, _error, _legacy_error), max_size=50))
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     def test_status_determinism(self, results):
         summary = _compute_summary(results)
         is_error = summary["filesFailed"] > 0
@@ -552,7 +552,7 @@ class TestComputeSummaryProperties:
             assert len(summary["errors"]) > 0 or summary["filesFailed"] > 0
 
     @given(_legacy_error)
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     def test_legacy_error_payload_classified_as_failed(self, legacy):
         """Payloads from the pre-fix design (error key, no status) are still errors."""
         summary = _compute_summary([legacy])

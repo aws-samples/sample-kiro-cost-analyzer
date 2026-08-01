@@ -163,6 +163,57 @@ Resources:
       UserPoolId: !Ref CognitoUserPool
       AdminEmail: !Ref AdminEmail
 
+  MappingMigratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-mapping-migrator"
+      Handler: mapping_migrator.lambda_handler
+      CodeUri: custom_resources/
+      Description: Custom Resource — migrates Git mapping items off the legacy sort key
+      MemorySize: 256
+      Timeout: 900
+      Layers:
+        - !Ref SharedLayer
+      Environment:
+        Variables:
+          ANALYTICS_TABLE: !Ref AnalyticsTable
+      Policies:
+        - Statement:
+            # This is deliberately the widest new grant in the feature:
+            # DynamoDB IAM conditions cannot constrain a sort-key prefix on
+            # DeleteItem, so a narrower grant than the full table ARN isn't
+            # achievable here (see design component 14).
+            - Sid: MappingMigrationTableAccess
+              Effect: Allow
+              Action:
+                - dynamodb:Scan
+                - dynamodb:PutItem
+                - dynamodb:DeleteItem
+              Resource:
+                - !GetAtt AnalyticsTable.Arn
+            - Sid: KMSForDynamoDB
+              Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+                - kms:DescribeKey
+              Resource:
+                - !GetAtt KCAEncryptionKey.Arn
+
+  MappingMigration:
+    Type: Custom::MappingMigration
+    DependsOn: AnalyticsTable
+    Properties:
+      ServiceToken: !GetAtt MappingMigratorFunction.Arn
+      # ServiceTimeout must stay above the function's Timeout (900s) above,
+      # or the stack can fail while the function is still legitimately
+      # working. Bump both together.
+      ServiceTimeout: "960"
+      TableName: !Ref AnalyticsTable
+      # Bumping this value in a future change is what triggers
+      # CloudFormation's Update lifecycle event and re-runs the migration.
+      MigrationVersion: "1"
+
   # ============================================================
   # S3 Buckets
   # ============================================================
@@ -1806,7 +1857,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
-            Path: /api/git/mappings/{userId}/{provider}/{gitUsername}
+            Path: /api/git/mappings/{userId}/{provider}
             Method: DELETE
         RecommendationsGet:
           Type: Api
@@ -1842,8 +1893,26 @@ Resources:
               Effect: Allow
               Action:
                 - s3:ListBucket
-              # Resource "*" is intentional: admins validate connectivity to
-              # any bucket name entered in the Settings page.
+              # holmes:suppress Encryption and Data Protection — Wildcard resource
+              # scope on s3:ListBucket allows listing ANY S3 bucket in any account.
+              #
+              # Accepted trade-off, not a fixable gap: `PUT /api/config/bucket`
+              # (config_handler.handle_put_config_bucket) calls
+              # `s3.head_bucket(Bucket=bucket_name)` to validate admin-supplied
+              # access to a source bucket BEFORE persisting it to SSM. HeadBucket
+              # has no dedicated IAM action — the S3 API requires s3:ListBucket
+              # for it. The bucket name is arbitrary admin input at request time
+              # (see .kiro/specs/cross-account-s3-access/), potentially in another
+              # AWS account, so it cannot be pinned to a naming convention or a
+              # deploy-time resource list without breaking that feature's stated
+              # purpose (validating connectivity to any configured source bucket,
+              # same-account or cross-account). Scoping this down would require
+              # either a fixed allowlist of expected bucket names (defeats the
+              # cross-account use case) or replacing the validation with a
+              # try/handle-AccessDenied pattern that gives up the pre-save
+              # feedback this endpoint exists to provide. Access is still
+              # read-only (list only, no object read/write) and gated behind the
+              # Admins group check in `backend/handler.py`.
               Resource: "arn:aws:s3:::*"
             - Sid: DynamoDBReadAccess
               Effect: Allow
@@ -2004,9 +2073,8 @@ Resources:
               Effect: Allow
               Action:
                 - ssm:GetParameter
-                - ssm:GetParametersByPath
               Resource:
-                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/kiro-cost-analyzer/*"
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/kiro-cost-analyzer/git-tokens/*"
             - Sid: KMSDecryptGitTokens
               Effect: Allow
               Action:
@@ -2101,9 +2169,8 @@ Resources:
             Effect: Allow
             Action:
               - ssm:GetParameter
-              - ssm:GetParametersByPath
             Resource:
-              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/kiro-cost-analyzer/*"
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/kiro-cost-analyzer/git-tokens/*"
           - Sid: KMSDecryptForSSM
             Effect: Allow
             Action:

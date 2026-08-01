@@ -26,7 +26,7 @@ This folder holds the UI screenshots referenced from the project [`README.md`](.
 
 The dashboard renders real user identities by design. Before committing:
 
-- **Replace user names and emails** with realistic synthetic equivalents. `anna.silva@example.com` is fine; `vinibat@amazon.com` is not.
+- **Replace user names and emails** with realistic synthetic equivalents. `anna.silva@example.com` is fine; a real corporate or personal email address is not.
 - **Replace AWS account IDs** if any leak into the UI (none should at this writing — confirm before merging).
 - **Replace Git usernames and repository names** with neutral placeholders (`acme-corp/api-service`).
 - **Avoid screenshots taken on production data.** Either run the seed script (`scripts/seed_test_data.py`) to populate a synthetic dataset, or post-process the image to redact.

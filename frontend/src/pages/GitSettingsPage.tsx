@@ -20,7 +20,7 @@ import {
   createGitMapping,
   deleteGitMapping,
 } from '../api/gitApi';
-import type { GitRepository, GitUserMapping, UsageResponse } from '../types';
+import type { GitRepository, GitUserMapping, GitMappingCreated, UsageResponse } from '../types';
 
 export default function GitSettingsPage() {
   const { user } = useAuth();
@@ -36,6 +36,7 @@ export default function GitSettingsPage() {
   const [mappings, setMappings] = useState<GitUserMapping[]>([]);
   const [mappingsLoading, setMappingsLoading] = useState(false);
   const [mappingError, setMappingError] = useState<string | null>(null);
+  const [mappingSuccess, setMappingSuccess] = useState<string | null>(null);
 
   const [userOptions, setUserOptions] = useState<SelectProps.Option[]>([]);
   const [selectedMappingUser, setSelectedMappingUser] = useState<SelectProps.Option | null>(null);
@@ -106,15 +107,17 @@ export default function GitSettingsPage() {
     }
   }
 
-  async function handleCreateMapping(data: { userId: string; provider: string; gitUsername: string }) {
-    await createGitMapping(data);
+  async function handleCreateMapping(data: { userId: string; provider: string; gitUsername: string }): Promise<GitMappingCreated> {
+    const result = await createGitMapping(data);
     if (selectedMappingUser?.value) fetchMappings(selectedMappingUser.value);
+    return result;
   }
 
   async function handleDeleteMapping(m: GitUserMapping) {
     setMappingError(null);
     try {
-      await deleteGitMapping(m.userId, m.provider, m.gitUsername);
+      await deleteGitMapping(m.userId, m.provider);
+      setMappingSuccess(t('gitSettings.mappings.success.removed'));
       if (selectedMappingUser?.value) fetchMappings(selectedMappingUser.value);
     } catch (err) {
       setMappingError(err instanceof Error ? err.message : t('gitSettings.mappings.error.delete'));
@@ -174,6 +177,7 @@ export default function GitSettingsPage() {
         <GitRepoForm visible={showRepoForm} onDismiss={() => setShowRepoForm(false)} onSubmit={handleCreateRepo} />
 
         {mappingError && <Alert type="error" dismissible onDismiss={() => setMappingError(null)}>{mappingError}</Alert>}
+        {mappingSuccess && <Alert type="success" dismissible onDismiss={() => setMappingSuccess(null)}>{mappingSuccess}</Alert>}
 
         <Header variant="h2">{t('gitSettings.mappings.title')}</Header>
 

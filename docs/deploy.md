@@ -57,6 +57,95 @@ To change the default region:
 > calls Bedrock, the most likely cause is that the model is not enabled in the
 > region. Enable model access via the Bedrock console under *Model access*.
 
+## GitLab integration prerequisites
+
+These apply only if you use the optional GitLab provider (registering a
+`gitlab` repository or a `gitlab` user mapping). If you only use GitHub, skip
+this section.
+
+### Migration cold-window prerequisite
+
+This is **not** a standing requirement for every KCA deploy — it only matters
+on:
+
+- the **first deploy** of this feature, or
+- any **later deploy** that bumps the `MigrationVersion` property on the
+  `MappingMigration` custom resource in `template.yaml`.
+
+On those deploys, the stack includes a `MappingMigration` custom resource
+(`custom_resources/mapping_migrator.py`) that converts any Git user-mapping
+items stored under the legacy DynamoDB sort key (`GITMAP#{provider}#{gitUsername}`)
+to the new one (`GITMAP#{provider}`). This runs automatically as part of
+`sam deploy` / `make deploy-infra` — there is no separate command to run — but
+the deploy takes a bit longer while it runs, bounded by the migrator
+function's `Timeout: 900` and the custom resource's `ServiceTimeout: "960"`.
+
+**Telling a complete run from a truncated one.** A truncated run still reports
+`SUCCESS` to CloudFormation and leaves a green stack, so a green deploy alone
+does not confirm the migration finished. Check CloudWatch Logs for the
+`MappingMigratorFunction` and find the "Mapping migration summary" structured
+log record, which carries `scanned`, `migrated`, `discarded`, `failed`,
+`unconverted`, and `truncated`. The run is complete only if `truncated` is
+`false` and `unconverted` is `0`. A `truncated: true` or a nonzero
+`unconverted`/`failed` means the migration did not finish in one invocation
+(for example, a very large number of legacy mappings) and needs a re-run.
+
+**Re-running the migration.** Bump the `MigrationVersion` property on the
+`MappingMigration` custom resource in `template.yaml` (currently `"1"`) and
+redeploy. CloudFormation treats the property change as an Update lifecycle
+event on the custom resource and re-runs the migrator. The migrator is
+idempotent — running it again over an already-migrated or partially-migrated
+store converges to the same correct end state without duplicating or losing
+data — so re-running after a truncated or partially failed attempt is safe.
+
+### AgentCore-to-GitLab network reachability
+
+The correlation agent (running in its own AgentCore container) makes the
+outbound HTTPS call to your configured GitLab instance directly — it is not
+proxied through the backend Lambda. If your GitLab instance is reachable only
+from inside a private network (VPC-only, on-prem, behind a VPN) and the
+AgentCore runtime cannot reach it, every GitLab correlation attempt fails with
+the `GITLAB_REQUEST_FAILED` status. Before relying on the GitLab integration,
+ensure network connectivity between the AgentCore runtime and the GitLab
+instance (for example, VPC peering, or a reachable public endpoint).
+
+### TLS certificate trust
+
+The GitLab tool keeps certificate verification **enabled by default**. A
+GitLab instance served behind a private or internal CA, or a self-signed
+certificate, fails TLS verification, which surfaces as
+`GITLAB_REQUEST_FAILED`. The correct fix is to install a certificate trusted
+by the AgentCore runtime's default trust store on the GitLab instance — for
+example, a certificate from a publicly trusted CA, or one chained to a CA
+already present in the container's trust bundle.
+
+**`GITLAB_SSL_VERIFY=false` — do not use in production.** As a documented,
+narrow exception (Requirement 10.3), setting the environment variable
+`GITLAB_SSL_VERIFY=false` (via `make deploy-agentcore GITLAB_SSL_VERIFY=false`,
+which passes it to `agentcore deploy --env`) disables certificate
+verification for GitLab API calls only. This is a deliberate escape hatch for
+sample/demo/lab environments where installing a trusted certificate is not
+practical, **not** a supported production configuration:
+
+- It disables protection against man-in-the-middle attacks on the
+  agent-to-GitLab connection, on which the `PRIVATE-TOKEN` credential
+  travels.
+- `gitlab_tool.py` logs a `logger.warning` on every request made with
+  verification disabled, so this is never a silent state in production
+  observability.
+- **MUST NOT be set in any production or customer-facing deployment.** If
+  your production GitLab instance has a self-signed certificate, replace it
+  with one issued by a trusted CA (public or internal) instead of disabling
+  verification.
+
+The Makefile default is `GITLAB_SSL_VERIFY ?= true` (verification enabled) —
+this is intentional and must not be changed at the repository level; override
+it per-invocation only, and only for a non-production target.
+
+Both of these are environment preconditions to satisfy before the GitLab
+integration works at all, not application bugs — which is why they sit here
+with the deployment steps rather than in the README.
+
 ## First deploy: `sam deploy --guided`
 
 `samconfig.toml` holds the stack name, region, capabilities, and parameter
@@ -162,7 +251,7 @@ runtime even after the AgentCore toolkit recreates it with a new ID.
 ```bash
 # The agentcore CLI lives in the project's virtualenv — activate it first.
 python3 -m venv .venv && source .venv/bin/activate
-pip install bedrock-agentcore-starter-toolkit
+pip install bedrock-agentcore-starter-toolkit==0.3.6
 
 make deploy-agentcore
 make deploy-agentcore AWS_PROFILE=my-profile

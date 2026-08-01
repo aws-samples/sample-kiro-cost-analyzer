@@ -69,7 +69,7 @@ File: screenshots/user-engagement.png
 
 ## AI-powered analysis
 
-- **Git-Kiro correlation** — On-demand AI agent (Claude Sonnet 4.6 via Amazon Bedrock AgentCore) semantically correlates Kiro prompts with GitHub commits/PRs and produces an Impact Score (0–100) with per-item confidence.
+- **Git-Kiro correlation** — On-demand AI agent (Claude Sonnet 4.6 via Amazon Bedrock AgentCore) semantically correlates Kiro prompts with commits and pull/merge requests from GitHub and GitLab (including self-hosted GitLab CE instances) and produces an Impact Score (0–100) with per-item confidence.
 - **Bilingual insights** — Insights are generated in English and Brazilian Portuguese in a single LLM call, so switching the UI locale renders the same recommendations in the active language with no additional cost.
 - **Prompt categorization** — Automatic classification via Amazon Bedrock Claude Haiku 4.5 across 14 categories (Code Generation, Debugging, Refactoring, Documentation, Testing, etc.).
 - **Feedback loop** — Users correct categories via modal; admins approve corrections; approved examples enrich the classifier's few-shot prompt dynamically.
@@ -105,5 +105,5 @@ See [deploy.md](deploy.md#scenario-b--cross-account) for the cross-account setup
 
 - **ETL management** — Manual trigger, schedule configuration (cron/rate), execution history with status.
 - **User management** — Cognito user CRUD, admin group assignment, custom attribute mapping.
-- **Git repository config** — Add/remove GitHub repos for correlation analysis, user-to-git-username mapping.
+- **Git repository config** — Add/remove GitHub or GitLab repos for correlation analysis, user-to-git-username mapping per provider.
 - **Settings** — Source bucket, prefixes, cross-account role ARNs, engagement thresholds.

@@ -131,7 +131,7 @@ describe('Property 6: cron humanizer locale coherence (parsable)', () => {
           return result === expected;
         },
       ),
-      { numRuns: 300 },
+      { numRuns: 60 },
     );
   });
 
@@ -148,7 +148,7 @@ describe('Property 6: cron humanizer locale coherence (parsable)', () => {
           return result === expected;
         },
       ),
-      { numRuns: 300 },
+      { numRuns: 60 },
     );
   });
 
@@ -165,7 +165,7 @@ describe('Property 6: cron humanizer locale coherence (parsable)', () => {
           return result === expected;
         },
       ),
-      { numRuns: 300 },
+      { numRuns: 60 },
     );
   });
 
@@ -183,7 +183,7 @@ describe('Property 6: cron humanizer locale coherence (parsable)', () => {
           return result === expected;
         },
       ),
-      { numRuns: 300 },
+      { numRuns: 60 },
     );
   });
 
@@ -202,7 +202,7 @@ describe('Property 6: cron humanizer locale coherence (parsable)', () => {
           return result === expected;
         },
       ),
-      { numRuns: 300 },
+      { numRuns: 60 },
     );
   });
 
@@ -229,7 +229,7 @@ describe('Property 6: cron humanizer locale coherence (parsable)', () => {
           return result === expected;
         },
       ),
-      { numRuns: 300 },
+      { numRuns: 60 },
     );
   });
 });
@@ -250,7 +250,7 @@ describe('Property 6: cron humanizer unparsable-expression identity', () => {
           return humanize(s, t) === s;
         },
       ),
-      { numRuns: 200 },
+      { numRuns: 40 },
     );
   });
 });

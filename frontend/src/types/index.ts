@@ -239,6 +239,16 @@ export interface GitUserMapping {
   createdAt: string;
 }
 
+/**
+ * Response body returned by `createGitMapping`. `replaced` describes the
+ * transaction (whether this create replaced an existing mapping for the
+ * same userId/provider pair), not a property of the stored mapping itself.
+ */
+export interface GitMappingCreated extends GitUserMapping {
+  replaced: boolean;
+  previousGitUsername?: string;
+}
+
 export interface GitActivitySummary {
   totalCommits: number;
   totalPRsOpened: number;
@@ -321,6 +331,9 @@ export type CorrelationStatusSlug =
   | 'GITHUB_TOKEN_MISSING'
   | 'GITHUB_AUTH_FAILED'
   | 'GITHUB_RATE_LIMIT'
+  | 'GITLAB_TOKEN_MISSING'
+  | 'GITLAB_AUTH_FAILED'
+  | 'GITLAB_RATE_LIMIT'
   | 'INSUFFICIENT_DATA'
   | 'AGENT_TIMEOUT'
   | 'AGENT_ERROR';

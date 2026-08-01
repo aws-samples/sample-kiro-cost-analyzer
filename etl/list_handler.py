@@ -14,7 +14,6 @@ when ``hasMore`` is ``true``.
 from __future__ import annotations
 
 import os
-import traceback
 
 try:
     from config import get_config
@@ -136,10 +135,13 @@ def list_handler(event, context):  # noqa: ARG001 - Lambda handler contract requ
         return result
 
     except Exception as exc:
+        # Deliberately generic: `errorMessage`/`stackTrace` from an arbitrary
+        # exception can echo back sensitive data (S3 keys, ARNs, credential
+        # fragments surfaced by a boto3 ClientError message, etc). Only the
+        # exception's class name is logged. Step Functions still receives
+        # the full traceback via its own execution history for debugging.
         logger.error(
             "File listing failed",
             errorType=type(exc).__name__,
-            errorMessage=str(exc),
-            stackTrace=traceback.format_exc(),
         )
         raise

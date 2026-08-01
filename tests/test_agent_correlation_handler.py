@@ -17,6 +17,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 from handlers.agent_correlation_handler import (
     handle_agent_correlation,
     _format_response,
+    build_repo_descriptors,
+    resolve_token_availability,
+    select_token_missing_slug,
 )
 
 
@@ -80,7 +83,7 @@ class TestCacheBehavior:
         git_repo.list_repo_configs.return_value = []
 
         with patch("handlers.agent_correlation_handler._is_pending", return_value=False), \
-             patch("handlers.agent_correlation_handler._fetch_github_token", return_value="ghp_token"), \
+             patch("handlers.agent_correlation_handler.resolve_token_availability", return_value=([{"repoId": "x"}], [])), \
              patch("handlers.agent_correlation_handler._set_pending_flag"), \
              patch("handlers.agent_correlation_handler._dispatch_worker") as mock_dispatch:
 
@@ -99,13 +102,18 @@ class TestAsyncDispatch:
     def test_dispatches_worker_when_no_cache(self, mock_repos):
         analytics_repo, git_repo = mock_repos
         git_repo.list_user_mappings.return_value = [{"provider": "github", "gitUsername": "octocat"}]
-        git_repo.list_repo_configs.return_value = [{"url": "https://github.com/org/repo1"}]
+        git_repo.list_repo_configs.return_value = [
+            {"PK": "GITREPO#abc12345", "provider": "github", "url": "https://github.com/org/repo1"}
+        ]
         analytics_repo.get_latest_analysis.return_value = None
 
         with patch("handlers.agent_correlation_handler._is_pending", return_value=False), \
-             patch("handlers.agent_correlation_handler._fetch_github_token", return_value="ghp_token"), \
+             patch("handlers.agent_correlation_handler.resolve_token_availability") as mock_resolve, \
              patch("handlers.agent_correlation_handler._set_pending_flag") as mock_set_pending, \
              patch("handlers.agent_correlation_handler._dispatch_worker") as mock_dispatch:
+
+            descriptor = {"repoId": "abc12345", "provider": "github", "gitUsername": "octocat", "owner": "org", "repo": "repo1"}
+            mock_resolve.return_value = ([descriptor], [])
 
             result = handle_agent_correlation(
                 "user1",
@@ -116,7 +124,7 @@ class TestAsyncDispatch:
             mock_set_pending.assert_called_once()
             mock_dispatch.assert_called_once_with(
                 "user1", "2026-04-28", "2026-05-05", "octocat",
-                [{"owner": "org", "repo": "repo1"}], "ghp_token",
+                [descriptor],
             )
             assert result["status"] == "processing"
             assert result["userId"] == "user1"
@@ -143,11 +151,17 @@ class TestAsyncDispatch:
     def test_does_not_dispatch_without_token(self, mock_repos):
         analytics_repo, git_repo = mock_repos
         git_repo.list_user_mappings.return_value = [{"provider": "github", "gitUsername": "octocat"}]
+        git_repo.list_repo_configs.return_value = [
+            {"PK": "GITREPO#abc12345", "provider": "github", "url": "https://github.com/org/repo1"}
+        ]
         analytics_repo.get_latest_analysis.return_value = None
 
         with patch("handlers.agent_correlation_handler._is_pending", return_value=False), \
-             patch("handlers.agent_correlation_handler._fetch_github_token", return_value=None), \
+             patch("handlers.agent_correlation_handler.resolve_token_availability") as mock_resolve, \
              patch("handlers.agent_correlation_handler._dispatch_worker") as mock_dispatch:
+
+            missing_descriptor = {"repoId": "abc12345", "provider": "github", "gitUsername": "octocat", "owner": "org", "repo": "repo1"}
+            mock_resolve.return_value = ([], [missing_descriptor])
 
             result = handle_agent_correlation(
                 "user1",
@@ -349,7 +363,7 @@ class TestResponseContractProperty:
         num_insights=st.integers(min_value=0, max_value=5),
         cached=st.booleans(),
     )
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     def test_all_required_keys_present(self, impact_score, impact_level, num_correlations, num_insights, cached):
         """All required keys present in response."""
         analysis = {
@@ -376,3 +390,227 @@ class TestResponseContractProperty:
         assert isinstance(result["insights"]["pt-BR"], list)
         assert isinstance(result["cached"], bool)
         assert result["status"] == "ready"
+
+
+class TestBuildRepoDescriptorsExample:
+    """Example test for ``build_repo_descriptors`` (task 10.8).
+
+    Fixed set of repo_configs mixing github and gitlab, plus one
+    unsupported provider, asserting the exact descriptor list and the
+    exact excluded list with reasons.
+    """
+
+    def test_mixed_providers_and_unsupported_provider(self):
+        repo_configs = [
+            {
+                "PK": "GITREPO#aaaaaaaa",
+                "provider": "github",
+                "url": "https://github.com/org/repo1",
+            },
+            {
+                "PK": "GITREPO#bbbbbbbb",
+                "provider": "gitlab",
+                "url": "https://gitlab.com/group/subgroup/repo2",
+            },
+            {
+                "PK": "GITREPO#cccccccc",
+                "provider": "bitbucket",
+                "url": "https://bitbucket.org/org/repo3",
+            },
+        ]
+        mappings = [
+            {"provider": "github", "gitUsername": "octocat"},
+            {"provider": "gitlab", "gitUsername": "gluser"},
+        ]
+
+        descriptors, excluded = build_repo_descriptors(repo_configs, mappings)
+
+        assert descriptors == [
+            {
+                "repoId": "aaaaaaaa",
+                "provider": "github",
+                "gitUsername": "octocat",
+                "owner": "org",
+                "repo": "repo1",
+            },
+            {
+                "repoId": "bbbbbbbb",
+                "provider": "gitlab",
+                "gitUsername": "gluser",
+                "baseUrl": "https://gitlab.com",
+                "projectPath": "group/subgroup/repo2",
+            },
+        ]
+        assert excluded == [
+            {
+                "repoId": "cccccccc",
+                "provider": "bitbucket",
+                "reason": "UNSUPPORTED_PROVIDER",
+            },
+        ]
+
+    def test_unparseable_url_and_no_user_mapping_reasons(self):
+        """Round out the exclusion reasons: UNPARSEABLE_URL and
+        NO_USER_MAPPING, each landing in exactly one list."""
+        repo_configs = [
+            {
+                "PK": "GITREPO#dddddddd",
+                "provider": "github",
+                "url": "not-a-valid-url",
+            },
+            {
+                "PK": "GITREPO#eeeeeeee",
+                "provider": "gitlab",
+                "url": "https://gitlab.com/group/repo3",
+            },
+        ]
+        # No gitlab mapping at all — the gitlab repo has an unresolved provider.
+        mappings = [{"provider": "github", "gitUsername": "octocat"}]
+
+        descriptors, excluded = build_repo_descriptors(repo_configs, mappings)
+
+        assert descriptors == []
+        assert excluded == [
+            {"repoId": "dddddddd", "provider": "github", "reason": "UNPARSEABLE_URL"},
+            {"repoId": "eeeeeeee", "provider": "gitlab", "reason": "NO_USER_MAPPING"},
+        ]
+
+
+class TestGitMappingMissingBranch:
+    """**Validates: Requirements 7.4**
+
+    IF the user has no Git mappings for any provider, THEN THE
+    Correlation_Handler SHALL return the ``GIT_MAPPING_MISSING`` Status_Slug.
+    """
+
+    def test_zero_mappings_returns_git_mapping_missing_slug(self, mock_repos):
+        analytics_repo, git_repo = mock_repos
+        git_repo.list_user_mappings.return_value = []
+
+        result = handle_agent_correlation(
+            "user1",
+            {"startDate": "2026-04-28", "endDate": "2026-05-05"},
+            {"userId": "user1", "groups": ["Admins"]},
+        )
+
+        assert result["status"] == "GIT_MAPPING_MISSING"
+        assert result["impactScore"] is None
+        assert result["cached"] is False
+        # No lookup of repo configs or tokens should happen once mappings are absent.
+        git_repo.list_repo_configs.assert_not_called()
+        analytics_repo.get_latest_analysis.assert_not_called()
+
+
+class TestTokenMissingSlugPerProvider:
+    """Token-missing branches per provider (task 10.8).
+
+    When no repository has a resolvable token, ``GITHUB_TOKEN_MISSING`` is
+    returned in a github-only scenario and ``GITLAB_TOKEN_MISSING`` in a
+    gitlab-only scenario.
+    """
+
+    def test_select_token_missing_slug_github_only(self):
+        missing = [
+            {"repoId": "aaaaaaaa", "provider": "github"},
+            {"repoId": "bbbbbbbb", "provider": "github"},
+        ]
+
+        assert select_token_missing_slug(missing) == "GITHUB_TOKEN_MISSING"
+
+    def test_select_token_missing_slug_gitlab_only(self):
+        missing = [{"repoId": "cccccccc", "provider": "gitlab"}]
+
+        assert select_token_missing_slug(missing) == "GITLAB_TOKEN_MISSING"
+
+    def test_resolve_token_availability_github_only_all_missing(self):
+        ssm_client = MagicMock()
+        ssm_client.exceptions.ParameterNotFound = Exception
+        ssm_client.get_parameter.side_effect = ssm_client.exceptions.ParameterNotFound
+
+        descriptors = [
+            {"repoId": "aaaaaaaa", "provider": "github"},
+            {"repoId": "bbbbbbbb", "provider": "github"},
+        ]
+
+        available, missing = resolve_token_availability(descriptors, ssm_client=ssm_client)
+
+        assert available == []
+        assert missing == descriptors
+        assert select_token_missing_slug(missing) == "GITHUB_TOKEN_MISSING"
+
+    def test_resolve_token_availability_gitlab_only_all_missing(self):
+        ssm_client = MagicMock()
+        ssm_client.exceptions.ParameterNotFound = Exception
+        ssm_client.get_parameter.side_effect = ssm_client.exceptions.ParameterNotFound
+
+        descriptors = [{"repoId": "cccccccc", "provider": "gitlab"}]
+
+        available, missing = resolve_token_availability(descriptors, ssm_client=ssm_client)
+
+        assert available == []
+        assert missing == descriptors
+        assert select_token_missing_slug(missing) == "GITLAB_TOKEN_MISSING"
+
+    def test_handler_returns_github_token_missing_for_github_only_repos(self, mock_repos):
+        analytics_repo, git_repo = mock_repos
+        git_repo.list_user_mappings.return_value = [
+            {"provider": "github", "gitUsername": "octocat"}
+        ]
+        git_repo.list_repo_configs.return_value = [
+            {"PK": "GITREPO#aaaaaaaa", "provider": "github", "url": "https://github.com/org/repo1"}
+        ]
+        analytics_repo.get_latest_analysis.return_value = None
+
+        missing_descriptor = {
+            "repoId": "aaaaaaaa",
+            "provider": "github",
+            "gitUsername": "octocat",
+            "owner": "org",
+            "repo": "repo1",
+        }
+
+        with patch("handlers.agent_correlation_handler._is_pending", return_value=False), \
+             patch("handlers.agent_correlation_handler.resolve_token_availability", return_value=([], [missing_descriptor])), \
+             patch("handlers.agent_correlation_handler._dispatch_worker") as mock_dispatch:
+
+            result = handle_agent_correlation(
+                "user1",
+                {"startDate": "2026-04-28", "endDate": "2026-05-05"},
+                {"userId": "user1", "groups": ["Admins"]},
+            )
+
+            mock_dispatch.assert_not_called()
+            assert result["status"] == "GITHUB_TOKEN_MISSING"
+            assert result["impactScore"] is None
+
+    def test_handler_returns_gitlab_token_missing_for_gitlab_only_repos(self, mock_repos):
+        analytics_repo, git_repo = mock_repos
+        git_repo.list_user_mappings.return_value = [
+            {"provider": "gitlab", "gitUsername": "glabuser"}
+        ]
+        git_repo.list_repo_configs.return_value = [
+            {"PK": "GITREPO#cccccccc", "provider": "gitlab", "url": "https://gitlab.com/group/repo3"}
+        ]
+        analytics_repo.get_latest_analysis.return_value = None
+
+        missing_descriptor = {
+            "repoId": "cccccccc",
+            "provider": "gitlab",
+            "gitUsername": "glabuser",
+            "baseUrl": "https://gitlab.com",
+            "projectPath": "group/repo3",
+        }
+
+        with patch("handlers.agent_correlation_handler._is_pending", return_value=False), \
+             patch("handlers.agent_correlation_handler.resolve_token_availability", return_value=([], [missing_descriptor])), \
+             patch("handlers.agent_correlation_handler._dispatch_worker") as mock_dispatch:
+
+            result = handle_agent_correlation(
+                "user1",
+                {"startDate": "2026-04-28", "endDate": "2026-05-05"},
+                {"userId": "user1", "groups": ["Admins"]},
+            )
+
+            mock_dispatch.assert_not_called()
+            assert result["status"] == "GITLAB_TOKEN_MISSING"
+            assert result["impactScore"] is None

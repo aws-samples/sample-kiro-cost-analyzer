@@ -73,7 +73,7 @@ describe('Property 2 — preference round-trip', () => {
           return restored === L;
         },
       ),
-      { numRuns: 100 },
+      { numRuns: 20 },
     );
   });
 

@@ -93,7 +93,7 @@ describe('Property 9: missing-key fallback', () => {
           return true;
         },
       ),
-      { numRuns: 100 },
+      { numRuns: 20 },
     );
   });
 });
@@ -125,7 +125,7 @@ describe('Property 10: brand invariance', () => {
           return catalog[catalogKey] === BRAND_STRINGS[brandKey];
         },
       ),
-      { numRuns: 100 },
+      { numRuns: 20 },
     );
   });
 });

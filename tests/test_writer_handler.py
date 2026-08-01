@@ -16,6 +16,7 @@ from etl.writer_handler import (
     _write_prompt_record,
     writer_handler,
 )
+from shared.structured_logger import StructuredLogger
 
 TABLE_NAME = "Analytics_Table"
 DATA_BUCKET = "test-data-bucket"
@@ -74,7 +75,7 @@ class TestWriteCsvRecord:
             "totalConversations": 2,
             "totalInteractions": 8,
         }
-        items = _write_csv_record(writer, record)
+        items = _write_csv_record(writer, record, StructuredLogger("test"))
 
         assert items == 3  # daily + global + activity_summary
 
@@ -116,7 +117,7 @@ class TestWritePromptRecord:
             "prompt": "hello",
             "response": "world",
         }
-        items = _write_prompt_record(writer, record)
+        items = _write_prompt_record(writer, record, StructuredLogger("test"))
 
         # prompt + daily stats + model + trigger + global + activity_summary = 6
         assert items == 6
@@ -171,7 +172,7 @@ class TestWritePromptRecord:
             "prompt": "hi",
             "response": "hey",
         }
-        items = _write_prompt_record(writer, record)
+        items = _write_prompt_record(writer, record, StructuredLogger("test"))
 
         # prompt + daily stats + global + activity_summary = 4 (no model, no trigger)
         assert items == 4
@@ -191,7 +192,7 @@ class TestWritePromptRecord:
             "prompt": "q",
             "response": "a",
         }
-        _write_prompt_record(writer, record)
+        _write_prompt_record(writer, record, StructuredLogger("test"))
 
         daily = table.get_item(
             Key={"PK": "USER#user-3", "SK": "STATS#DAILY#2025-02-20"}

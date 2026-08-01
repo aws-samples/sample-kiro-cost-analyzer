@@ -9,7 +9,12 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
-from handlers.correlation_worker import lambda_handler, _clear_pending_flag, _coerce_bilingual_insights
+from handlers.correlation_worker import (
+    lambda_handler,
+    _clear_pending_flag,
+    _coerce_bilingual_insights,
+    _invoke_agent,
+)
 
 
 @pytest.fixture
@@ -230,3 +235,97 @@ class TestWorkerPersistsBilingualShape:
         persisted = self._run_worker_with_agent_payload(mock_env, worker_event, agent_payload)
 
         assert persisted["insights"] == {"en": [], "pt-BR": []}
+
+
+class TestInvokeAgentPayloadForwarding:
+    """Concrete examples complementing the general round-trip property
+    (Property 12, in `tests/test_gitlab_provider_properties.py`). These
+    fix a specific, provider-tagged `repos` shape rather than an arbitrary
+    one, so a regression that mangles a *realistic* descriptor is caught
+    even if a future change to the property's generator loosens it.
+
+    Validates: Requirements 7.5
+    """
+
+    def test_provider_tagged_repos_forwarded_verbatim(self, mock_env):
+        """`_invoke_agent` must pass `repos` through unchanged: no
+        transformation, no filtering, no defaulting (task 11.1).
+        """
+        repos = [
+            {
+                "repoId": "a1b2c3d4",
+                "provider": "github",
+                "owner": "octo-org",
+                "repo": "octo-repo",
+                "gitUsername": "octocat",
+            },
+            {
+                "repoId": "e5f6a7b8",
+                "provider": "gitlab",
+                "baseUrl": "https://gitlab.example.com",
+                "projectPath": "group/subgroup/project",
+                "gitUsername": "gitlab-user",
+            },
+        ]
+
+        with patch("handlers.correlation_worker.boto3.client") as mock_client:
+            mock_agentcore = MagicMock()
+            mock_response = MagicMock()
+            mock_response.read.return_value = b"{}"
+            mock_agentcore.invoke_agent_runtime.return_value = {"response": mock_response}
+            mock_client.return_value = mock_agentcore
+
+            _invoke_agent(
+                user_id="user1",
+                start_date="2026-04-28",
+                end_date="2026-05-05",
+                git_username="octocat",
+                repos=repos,
+            )
+
+            _, call_kwargs = mock_agentcore.invoke_agent_runtime.call_args
+            sent_payload = json.loads(call_kwargs["payload"].decode("utf-8"))
+
+            # Same descriptors, same fields per descriptor, same order —
+            # exactly as constructed above, nothing added or dropped.
+            assert sent_payload["repos"] == repos
+            assert sent_payload["gitUsername"] == "octocat"
+
+
+class TestInvokeAgentUnconfiguredRuntimeArnGuard:
+    """The unconfigured-runtime-ARN guard in `_invoke_agent`: a missing or
+    placeholder `CORRELATION_AGENT_RUNTIME_ARN` must raise a clear
+    `RuntimeError` and never reach `boto3.client("bedrock-agentcore")`.
+
+    Validates: Requirements 7.5
+    """
+
+    def test_missing_arn_raises_and_never_calls_boto3_client(self, monkeypatch):
+        monkeypatch.delenv("CORRELATION_AGENT_RUNTIME_ARN", raising=False)
+
+        with patch("handlers.correlation_worker.boto3.client") as mock_client:
+            with pytest.raises(RuntimeError, match="CORRELATION_AGENT_RUNTIME_ARN"):
+                _invoke_agent(
+                    user_id="user1",
+                    start_date="2026-04-28",
+                    end_date="2026-05-05",
+                    git_username="octocat",
+                    repos=[],
+                )
+
+            mock_client.assert_not_called()
+
+    def test_none_placeholder_arn_raises_and_never_calls_boto3_client(self, monkeypatch):
+        monkeypatch.setenv("CORRELATION_AGENT_RUNTIME_ARN", "NONE")
+
+        with patch("handlers.correlation_worker.boto3.client") as mock_client:
+            with pytest.raises(RuntimeError, match="CORRELATION_AGENT_RUNTIME_ARN"):
+                _invoke_agent(
+                    user_id="user1",
+                    start_date="2026-04-28",
+                    end_date="2026-05-05",
+                    git_username="octocat",
+                    repos=[],
+                )
+
+            mock_client.assert_not_called()

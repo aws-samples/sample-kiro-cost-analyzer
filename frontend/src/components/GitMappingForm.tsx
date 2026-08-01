@@ -6,18 +6,18 @@ import Button from '@cloudscape-design/components/button';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import Alert from '@cloudscape-design/components/alert';
 import { useI18n } from '../i18n/useI18n';
+import { buildProviderOptions } from '../constants/gitProviders';
+import type { GitMappingCreated } from '../types';
 
 interface GitMappingFormProps {
   userOptions: SelectProps.Option[];
-  onSubmit: (data: { userId: string; provider: string; gitUsername: string }) => Promise<void>;
+  onSubmit: (data: { userId: string; provider: string; gitUsername: string }) => Promise<GitMappingCreated>;
 }
 
 export default function GitMappingForm({ userOptions, onSubmit }: GitMappingFormProps) {
   const { t } = useI18n();
 
-  const PROVIDER_OPTIONS: SelectProps.Option[] = [
-    { value: 'github', label: t('git.provider.github') },
-  ];
+  const PROVIDER_OPTIONS: SelectProps.Option[] = buildProviderOptions(t);
 
   const [selectedUser, setSelectedUser] = useState<SelectProps.Option | null>(null);
   const [provider, setProvider] = useState<SelectProps.Option | null>(null);
@@ -44,11 +44,15 @@ export default function GitMappingForm({ userOptions, onSubmit }: GitMappingForm
     setError(null);
     setSuccess(null);
     try {
-      await onSubmit({ userId: selectedUser!.value!, provider: provider!.value!, gitUsername: gitUsername.trim() });
+      const result = await onSubmit({ userId: selectedUser!.value!, provider: provider!.value!, gitUsername: gitUsername.trim() });
       setSelectedUser(null);
       setProvider(null);
       setGitUsername('');
-      setSuccess(t('gitMappingForm.success'));
+      if (result.replaced && result.previousGitUsername) {
+        setSuccess(t('gitMappingForm.successReplaced', { previous: result.previousGitUsername, current: result.gitUsername }));
+      } else {
+        setSuccess(t('gitMappingForm.success'));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('gitMappingForm.error.generic'));
     } finally {

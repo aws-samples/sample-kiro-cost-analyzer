@@ -2,6 +2,7 @@ import { get, post, del } from './client';
 import type {
   GitRepository,
   GitUserMapping,
+  GitMappingCreated,
   GitActivityResponse,
   CorrelationResponse,
   CorrelationAnalysis,
@@ -36,8 +37,8 @@ export function createGitMapping(body: {
   userId: string;
   provider: string;
   gitUsername: string;
-}): Promise<GitUserMapping> {
-  return post<GitUserMapping>('/api/git/mappings', body);
+}): Promise<GitMappingCreated> {
+  return post<GitMappingCreated>('/api/git/mappings', body);
 }
 
 export function listGitMappings(userId: string): Promise<{ mappings: GitUserMapping[] }> {
@@ -47,9 +48,8 @@ export function listGitMappings(userId: string): Promise<{ mappings: GitUserMapp
 export function deleteGitMapping(
   userId: string,
   provider: string,
-  gitUsername: string,
 ): Promise<{ status: string }> {
-  return del<{ status: string }>(`/api/git/mappings/${userId}/${provider}/${gitUsername}`);
+  return del<{ status: string }>(`/api/git/mappings/${userId}/${provider}`);
 }
 
 // --- Activity & Correlation ---

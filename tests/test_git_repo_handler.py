@@ -104,7 +104,7 @@ class TestSsmRollbackOnDynamoFailure:
     ):
         captured: dict = {}
         from backend.handlers import git_repo_handler
-        from repository import git_repository
+        from git_shared import git_repository
 
         original_generate = git_repo_handler._generate_repo_id
 
@@ -158,7 +158,7 @@ class TestSsmRollbackOnDynamoFailure:
         self, aws_env, valid_body, claims, monkeypatch
     ):
         from backend.handlers import git_repo_handler
-        from repository import git_repository
+        from git_shared import git_repository
 
         def failing_put_repo_config(self, repo_id, config):
             raise RuntimeError("DynamoDB exploded")

@@ -8,6 +8,7 @@ import SpaceBetween from '@cloudscape-design/components/space-between';
 import Box from '@cloudscape-design/components/box';
 import Alert from '@cloudscape-design/components/alert';
 import { useI18n } from '../i18n/useI18n';
+import { buildProviderOptions } from '../constants/gitProviders';
 
 function isValidUrl(url: string): boolean {
   try {
@@ -27,9 +28,7 @@ interface GitRepoFormProps {
 export default function GitRepoForm({ visible, onDismiss, onSubmit }: GitRepoFormProps) {
   const { t } = useI18n();
 
-  const PROVIDER_OPTIONS: SelectProps.Option[] = [
-    { value: 'github', label: t('git.provider.github') },
-  ];
+  const PROVIDER_OPTIONS: SelectProps.Option[] = buildProviderOptions(t);
 
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');

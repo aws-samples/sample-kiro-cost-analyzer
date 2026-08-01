@@ -18,7 +18,11 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from repository.analytics_repository import AnalyticsRepository
-from repository.git_repository import GitRepository
+
+try:
+    from git_shared.git_repository import GitRepository
+except ImportError:
+    from layers.shared.git_shared.git_repository import GitRepository
 from shared.structured_logger import StructuredLogger
 
 logger = StructuredLogger("correlation-worker")
@@ -49,12 +53,19 @@ def _coerce_bilingual_insights(raw) -> dict:
 def lambda_handler(event: dict, context) -> dict:
     """Entry point for the correlation worker Lambda.
 
-    Receives a payload with userId, startDate, endDate, gitUsername, repos,
-    and token. Invokes AgentCore, persists the result, and clears the
-    pending flag in DynamoDB.
+    Receives a payload with userId, startDate, endDate, gitUsername, and
+    repos. Invokes AgentCore, persists the result, and clears the pending
+    flag in DynamoDB.
+
+    ``repos`` holds provider-tagged repository descriptors (see
+    ``agent_correlation_handler.build_repo_descriptors``), not a plain
+    owner/repo list — this handler forwards them to the agent unchanged and
+    never inspects their shape. Per DD-3, tokens never travel in this
+    payload; the agent resolves credentials itself via SSM using each
+    descriptor's ``repoId``.
 
     Args:
-        event: Dict with userId, startDate, endDate, gitUsername, repos, token.
+        event: Dict with userId, startDate, endDate, gitUsername, repos.
         context: Lambda context (unused).
 
     Returns:
@@ -122,8 +133,13 @@ def _invoke_agent(
         user_id: Kiro user identifier.
         start_date: Analysis start date (YYYY-MM-DD).
         end_date: Analysis end date (YYYY-MM-DD).
-        git_username: GitHub username.
-        repos: List of dicts with owner/repo.
+        git_username: GitHub username, retained for backward compatibility
+            with agent builds that have not been updated to read
+            provider-tagged descriptors (DD-5).
+        repos: List of provider-tagged repository descriptors, forwarded
+            verbatim from the incoming event payload (see
+            ``agent_correlation_handler.build_repo_descriptors`` for the
+            descriptor shape).
 
     Returns:
         Parsed analysis result dict.

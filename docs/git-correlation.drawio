@@ -55,6 +55,12 @@
         <mxCell id="github_api" parent="1" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.client;fillColor=#232F3E;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="GitHub API" vertex="1">
           <mxGeometry height="70" width="70" x="526" y="211" as="geometry" />
         </mxCell>
+        <mxCell id="gitlab_tool" parent="1" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.api_gateway;fillColor=#E7157B;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="GitLab Tool&lt;br&gt;(direct HTTPS)" vertex="1">
+          <mxGeometry height="80" width="80" x="230" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="gitlab_api" parent="1" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.client;fillColor=#232F3E;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="GitLab Instance&lt;br&gt;(REST API v4)" vertex="1">
+          <mxGeometry height="70" width="70" x="526" y="100" as="geometry" />
+        </mxCell>
         <mxCell id="claude" parent="1" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sagemaker;fillColor=#01A88D;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Claude Sonnet 4.6&lt;br&gt;(Amazon Bedrock)" vertex="1">
           <mxGeometry height="80" width="80" x="820" y="378" as="geometry" />
         </mxCell>
@@ -92,6 +98,12 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="e8" edge="1" parent="1" source="github_tool" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="github_api" value="list_commits, list_pull_requests">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" edge="1" parent="1" source="agentcore" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;exitX=0.883;exitY=1.003;exitDx=0;exitDy=0;exitPerimeter=0;" target="gitlab_tool" value="Fetch Git activity">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" edge="1" parent="1" source="gitlab_tool" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="gitlab_api" value="get_commits, get_merge_requests">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="e9" edge="1" parent="1" source="agentcore" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="claude" value="Correlate datasets">

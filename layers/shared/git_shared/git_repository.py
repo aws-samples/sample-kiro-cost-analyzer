@@ -13,7 +13,12 @@ import logging
 from decimal import Decimal
 
 import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
+
+try:
+    from git_shared.git_providers import mapping_sort_key
+except ImportError:
+    from layers.shared.git_shared.git_providers import mapping_sort_key
 
 logger = logging.getLogger(__name__)
 
@@ -174,11 +179,16 @@ class GitRepository:
         )
 
     # ------------------------------------------------------------------
-    # 2. User-Git mappings  (PK=USER#{userId}, SK=GITMAP#{provider}#{gitUsername})
+    # 2. User-Git mappings  (PK=USER#{userId}, SK=GITMAP#{provider})
     # ------------------------------------------------------------------
 
-    def put_user_mapping(self, user_id: str, mapping: dict) -> dict:
-        """Create a user-to-Git mapping.
+    def put_user_mapping(self, user_id: str, mapping: dict) -> tuple[dict, dict | None]:
+        """Create or replace the user's mapping for a provider.
+
+        The Mapping_Sort_Key is shaped as ``GITMAP#{provider}`` (one mapping
+        per user per provider), so writing a new mapping for a provider the
+        user is already mapped on replaces the prior mapping rather than
+        creating a second item.
 
         Args:
             user_id: Kiro user identifier.
@@ -186,17 +196,22 @@ class GitRepository:
                      createdAt, createdBy.
 
         Returns:
-            The stored item.
+            A ``(stored_item, previous_item)`` tuple. ``previous_item`` is
+            None when there was no prior mapping for this user/provider,
+            otherwise the decimal-converted item that was overwritten.
         """
         provider = mapping["provider"]
-        git_username = mapping["gitUsername"]
         item = {
             "PK": f"USER#{user_id}",
-            "SK": f"GITMAP#{provider}#{git_username}",
+            "SK": mapping_sort_key(provider),
             **mapping,
         }
-        self._table.put_item(Item=item)
-        return self._convert_decimals(item)
+        response = self._table.put_item(Item=item, ReturnValues="ALL_OLD")
+        previous_attributes = response.get("Attributes")
+        previous_item = (
+            self._convert_decimals(previous_attributes) if previous_attributes else None
+        )
+        return self._convert_decimals(item), previous_item
 
     def list_user_mappings(self, user_id: str) -> list[dict]:
         """List all Git mappings for a given Kiro user.
@@ -221,20 +236,18 @@ class GitRepository:
 
         return self._convert_decimals(items)
 
-    def delete_user_mapping(
-        self, user_id: str, provider: str, git_username: str
-    ) -> None:
-        """Delete a specific user-Git mapping.
+    def delete_user_mapping(self, user_id: str, provider: str) -> None:
+        """Delete the user's mapping for a provider.
 
         Args:
             user_id: Kiro user identifier.
-            provider: Git provider name.
-            git_username: Git username to unmap.
+            provider: Git provider name. The Mapping_Sort_Key is shaped as
+                      ``GITMAP#{provider}``.
         """
         self._table.delete_item(
             Key={
                 "PK": f"USER#{user_id}",
-                "SK": f"GITMAP#{provider}#{git_username}",
+                "SK": mapping_sort_key(provider),
             }
         )
 
@@ -256,12 +269,10 @@ class GitRepository:
         Returns:
             List of mapping dicts.
         """
-        from boto3.dynamodb.conditions import Attr
-
         items: list[dict] = []
         kwargs: dict = {
             "FilterExpression": (
-                Key("SK").begins_with(f"GITMAP#{provider}#")
+                Attr("SK").eq(mapping_sort_key(provider))
                 & Attr("provider").eq(provider)
             ),
         }

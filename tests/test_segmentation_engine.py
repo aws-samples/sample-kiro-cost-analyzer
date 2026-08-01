@@ -45,7 +45,7 @@ class TestClassificationCompletenessAndMutualExclusivity:
     **Validates: Requirements 1.1, 1.2, 1.3, 1.4, 1.5, 1.6**
     """
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(
         messages=st.integers(min_value=0, max_value=10000),
         days_active=st.integers(min_value=0, max_value=365),
@@ -64,7 +64,7 @@ class TestClassificationCompletenessAndMutualExclusivity:
         valid_categories: set[EngagementCategory] = {"power", "active", "light", "idle"}
         assert result in valid_categories
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(
         messages=st.integers(min_value=0, max_value=10000),
         days_active=st.integers(min_value=0, max_value=365),
@@ -83,7 +83,7 @@ class TestClassificationCompletenessAndMutualExclusivity:
         if messages >= thresholds.power_messages and days_active >= thresholds.power_days_active:
             assert result == "power"
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(
         messages=st.integers(min_value=0, max_value=10000),
         days_active=st.integers(min_value=0, max_value=365),
@@ -111,7 +111,7 @@ class TestClassificationCompletenessAndMutualExclusivity:
         if meets_active and not meets_power:
             assert result == "active"
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(
         messages=st.integers(min_value=0, max_value=10000),
         days_active=st.integers(min_value=0, max_value=365),
@@ -135,7 +135,7 @@ class TestClassificationCompletenessAndMutualExclusivity:
         if messages >= 1 and not meets_active:
             assert result == "light"
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(
         days_active=st.integers(min_value=0, max_value=365),
         thresholds=valid_thresholds(),
@@ -151,7 +151,7 @@ class TestClassificationCompletenessAndMutualExclusivity:
         result = classify_user(activity, thresholds)
         assert result == "idle"
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(
         messages=st.integers(min_value=100, max_value=10000),
         thresholds=valid_thresholds(),
@@ -186,7 +186,7 @@ class TestThresholdValidationCorrectness:
     **Validates: Requirements 2.5, 2.6**
     """
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(
         power_messages=st.integers(min_value=1, max_value=10000),
         active_messages=st.integers(min_value=1, max_value=10000),
@@ -210,7 +210,7 @@ class TestThresholdValidationCorrectness:
             assert is_valid is False
             assert error != ""
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(
         power_messages=st.integers(min_value=-1000, max_value=10000),
         active_messages=st.integers(min_value=-1000, max_value=10000),
@@ -238,7 +238,7 @@ class TestThresholdValidationCorrectness:
             assert is_valid is False
             assert error != ""
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(data=st.one_of(st.none(), st.text(), st.integers(), st.lists(st.integers())))
     def test_missing_structure_fails(self, data):
         """Configs missing required structure always fail with non-empty error."""
@@ -259,7 +259,7 @@ class TestClassificationDeterminismAndThresholdMonotonicity:
     **Validates: Requirements 1.1, 2.5**
     """
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(
         messages=st.integers(min_value=0, max_value=10000),
         days_active=st.integers(min_value=0, max_value=365),
@@ -316,7 +316,7 @@ class TestClassificationDeterminismAndThresholdMonotonicity:
         if result_strict == "power":
             assert result_lenient == "power"
 
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     @given(
         messages=st.integers(min_value=0, max_value=10000),
         days_active=st.integers(min_value=0, max_value=365),

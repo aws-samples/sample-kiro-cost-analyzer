@@ -17,7 +17,9 @@ This document describes the architecture of the Kiro Cost Analyzer sample: the h
 
 ## High-level overview
 
-![Architecture diagram showing the frontend React SPA connecting to Amazon API Gateway and AWS Lambda backend, which integrates with Amazon DynamoDB, Amazon S3, Amazon Cognito, and a Git-Kiro Correlation Agent using Amazon Bedrock AgentCore and Claude Sonnet 4.6](architecture.png)
+![Architecture diagram showing the frontend React SPA connecting to Amazon API Gateway and AWS Lambda backend, which integrates with Amazon DynamoDB, Amazon S3, Amazon Cognito, and a Git-Kiro Correlation Agent using Amazon Bedrock AgentCore and Claude Sonnet 4.6 with GitHub and GitLab tools](architecture.png)
+
+> The `.drawio` source now includes the GitLab egress path alongside the existing GitHub one (see the [GitLab integration prerequisites](deploy.md#gitlab-integration-prerequisites) in the deploy guide). Re-exporting `architecture.png` from the updated source is a manual draw.io step left to the maintainer — the image above still shows the GitHub-only agent group.
 
 **Stack:** AWS SAM · Python 3.13 · React 19 · TypeScript · Cloudscape · AWS Step Functions · Amazon DynamoDB · Amazon S3 · Amazon Cognito · AWS IAM Identity Center · Amazon Bedrock · Amazon Bedrock AgentCore.
 
@@ -28,7 +30,7 @@ The system is composed of four runtime surfaces:
 | **Frontend SPA** | React 19, TypeScript, Cloudscape, `react-i18next` | Cognito-authenticated dashboard. Consumes the Backend API and renders metrics, tier optimization, engagement, and Git correlation. |
 | **Backend API** | AWS Lambda (Python 3.13), API Gateway REST, Cognito Authorizer | Stateless request/response. Reads from DynamoDB, writes feature-flag and threshold values to SSM, triggers ETL on demand, calls AgentCore for correlation. |
 | **ETL pipeline** | AWS Step Functions Standard + Distributed Map Express, AWS Lambda, EventBridge Scheduler | Daily (or on-demand) ingestion of Kiro activity CSVs and prompt logs from S3 into DynamoDB. Runs a categorization phase backed by Bedrock and a reconcile pass against Identity Center. |
-| **Correlation agent** | Amazon Bedrock AgentCore, Claude Sonnet 4.6, MCP tools | On-demand semantic correlation between a developer's Kiro prompts and their GitHub activity. Result is cached in DynamoDB for 7 days. |
+| **Correlation agent** | Amazon Bedrock AgentCore, Claude Sonnet 4.6, MCP and direct-HTTPS tools | On-demand semantic correlation between a developer's Kiro prompts and their Git activity on GitHub and/or GitLab, selected per repository by that repository's configured provider. Result is cached in DynamoDB for 7 days. |
 
 All four sit inside a single AWS account by default, with an opt-in cross-account variant for the source S3 bucket and IAM Identity Center.
 
@@ -106,18 +108,23 @@ sequenceDiagram
 
 ## Git-Kiro correlation agent
 
-On-demand semantic correlation powered by Amazon Bedrock AgentCore (Claude Sonnet 4.6).
+On-demand semantic correlation powered by Amazon Bedrock AgentCore (Claude Sonnet 4.6), across GitHub and GitLab repositories.
 
-![Git-Kiro correlation data flow diagram showing cache check, agent invocation with tools, and result persistence](git-kiro-correlation-flow.png)
+![Git-Kiro correlation data flow diagram showing cache check, agent invocation with GitHub and GitLab tools, and result persistence](git-kiro-correlation-flow.png)
+
+> The `.drawio` source now adds the GitLab egress path (repository descriptor → GitLab Tool → GitLab instance) alongside the existing GitHub path. Re-exporting `git-kiro-correlation-flow.png` from the updated source is a manual draw.io step left to the maintainer — the image above still shows the GitHub-only correlation flow.
 
 ### How a correlation request is served
 
 1. The user opens the Productivity page and selects a developer.
 2. The Backend API checks `AnalyticsTable` for a cached `ANALYSIS#…` item with TTL still valid (7 days).
-3. On cache miss, the backend invokes the AgentCore runtime, which orchestrates two MCP tools:
-   - **GitHub Tool** — exposed via the AgentCore Gateway with OAuth credentials from SSM. Lists commits and PRs for the developer's mapped Git username.
+3. On cache miss, the backend builds a provider-tagged repository descriptor per configured repository (provider, location parameters, and a repository-scoped SSM token identifier — never the token value itself) and invokes the AgentCore runtime, which orchestrates three tools:
+   - **GitHub Tool** — calls the GitHub REST API. Lists commits and PRs for the developer's mapped GitHub username.
+   - **GitLab Tool** — calls the configured GitLab instance's REST API v4 directly (no gateway hop), authenticating with the `PRIVATE-TOKEN` header. Lists commits and merge requests for the developer's mapped GitLab username.
    - **Kiro Data Tool** — a Lambda invoked with IAM auth. Returns the developer's prompts and daily stats from DynamoDB.
-4. Claude Sonnet 4.6 reasons over both datasets and produces a structured response: `impactScore` (0–100), individual `correlations` (prompt ↔ commit/PR with confidence), and natural-language `insights`.
+
+   The agent calls the tool matching each repository descriptor's provider; a repository with no user mapping for its provider is excluded from the analysis rather than guessed at.
+4. Claude Sonnet 4.6 reasons over all datasets and produces a structured response: `impactScore` (0–100), individual `correlations` (prompt ↔ commit/PR/MR with confidence), and natural-language `insights`. GitLab merge requests and GitHub pull requests are treated as the same concept for correlation purposes.
 5. The result is written back to `AnalyticsTable` with a 7-day TTL and returned to the client.
 
 ### Sequence diagram — cache miss
@@ -129,21 +136,24 @@ sequenceDiagram
     participant API as Backend Lambda
     participant AT as AnalyticsTable
     participant AC as Bedrock AgentCore Runtime
-    participant GH as GitHub Tool (MCP via AgentCore Gateway)
+    participant GH as GitHub Tool
+    participant GL as GitLab Tool (direct REST API v4)
     participant KD as Kiro Data Tool (Lambda)
     participant Be as Bedrock Claude Sonnet 4.6
 
     FE->>API: GET /api/productivity/{userId}/correlation
     API->>AT: Query ANALYSIS#{date}#…
     AT-->>API: no item (cache miss)
-    API->>AC: InvokeAgentRuntime(userId, period)
-    AC->>GH: list_commits + list_pull_requests
-    GH-->>AC: commits[], pullRequests[]
+    API->>AC: InvokeAgentRuntime(userId, period, repos[] with provider)
+    AC->>GH: get_github_activity (per GitHub repository)
+    GH-->>AC: commits[], pull_requests[]
+    AC->>GL: get_gitlab_activity (per GitLab repository)
+    GL-->>AC: commits[], pull_requests[] (merge requests)
     AC->>KD: get_prompts + get_daily_stats
     KD->>AT: Query USER#{userId}
     AT-->>KD: prompts[], dailyStats[]
     KD-->>AC: prompts[], dailyStats[]
-    AC->>Be: reason(commits, prs, prompts)
+    AC->>Be: reason(commits, prs/mrs, prompts)
     Be-->>AC: { impactScore, correlations[], insights }
     AC-->>API: structured response
     API->>AT: PutItem ANALYSIS# (TTL +7d)
@@ -159,6 +169,17 @@ sequenceDiagram
 | Metadata | Read-only | Required by GitHub for any repo access |
 
 Restrict the token to only the repositories you intend to analyze. `Administration` and `Commit statuses` are not required.
+
+### GitLab token scopes
+
+The GitLab integration uses a GitLab Personal Access Token, sent on the `PRIVATE-TOKEN` header rather than `Authorization` — a distinct authentication mechanism from GitHub's OAuth-style token header, not a variant of it.
+
+| Scope | Reason |
+|---|---|
+| `read_api` | List commits and merge requests via the REST API v4 |
+| `read_repository` | Read commit history for the configured project |
+
+Personal Access Tokens only — GitLab OAuth apps are out of scope for this sample. The token is stored per repository in SSM Parameter Store (`SecureString`, path `/kiro-cost-analyzer/git-tokens/{repoId}`), the same layout used for GitHub tokens — provider-independent. Certificate verification is enabled by default for GitLab requests. `GITLAB_SSL_VERIFY=false` disables it as a documented, narrow exception for self-signed instances — **this MUST NOT be used in production**; see [TLS certificate trust](deploy.md#tls-certificate-trust). See [GitLab integration prerequisites](deploy.md#gitlab-integration-prerequisites) for the self-hosted network-reachability and TLS-trust preconditions.
 
 ---
 
@@ -281,15 +302,15 @@ This section explains the choices that are likely to look surprising at first gl
 
 ### Why Bedrock AgentCore for correlation, not a direct Bedrock InvokeModel call
 
-**Decision.** Git-Kiro correlation runs on Amazon Bedrock AgentCore with two MCP tools (GitHub via the AgentCore Gateway, Kiro data via Lambda).
+**Decision.** Git-Kiro correlation runs on Amazon Bedrock AgentCore with three tools: GitHub (via the AgentCore Gateway), GitLab (a direct HTTPS call to the configured instance, no gateway hop), and Kiro data (via Lambda).
 
 **Why.**
-- The correlation requires **two independent data sources** (Git provider + DynamoDB). MCP gives Claude a tool-use contract instead of having the backend pre-stuff a single mega-prompt; the model can decide which calls to issue and in what order.
-- AgentCore handles OAuth credential rotation for the GitHub Tool through the Gateway, so the backend never sees the GitHub PAT directly.
+- The correlation requires **independent data sources per provider plus Kiro's own data** (one or more Git providers + DynamoDB). Giving Claude a tool-use contract instead of having the backend pre-stuff a single mega-prompt lets the model decide which calls to issue, for which repositories, and in what order — including calling both the GitHub and GitLab tools in the same run when a developer has repositories on both.
+- AgentCore handles OAuth credential rotation for the GitHub Tool through the Gateway, so the backend never sees the GitHub PAT directly. The GitLab Tool does not go through the Gateway — GitLab authenticates with a static Personal Access Token on the `PRIVATE-TOKEN` header, resolved by the agent from a repository-scoped SSM parameter rather than an OAuth flow — so gateway-mediated rotation does not apply there.
 - AgentCore Runtime scales to zero when idle, which matches the on-demand usage pattern (a handful of invocations per week per organization).
 
 **Rejected alternatives.**
-- *Direct Bedrock `InvokeModel`.* The backend would need to (a) pre-fetch all GitHub data and all Kiro data, (b) pre-format the prompt, and (c) parse the response. Larger prompt, brittle JSON formatting requirements, no tool-use loop.
+- *Direct Bedrock `InvokeModel`.* The backend would need to (a) pre-fetch all Git provider data and all Kiro data, (b) pre-format the prompt, and (c) parse the response. Larger prompt, brittle JSON formatting requirements, no tool-use loop.
 - *Periodic Pearson correlation in a scheduled Lambda.* Was the v2.x approach. Statistical correlation is fast and cheap but produces brittle results — Kiro prompts and Git commits do not co-occur on the same day for many real workflows. Semantic correlation produces actionable insights.
 
 ### Why Cloudscape

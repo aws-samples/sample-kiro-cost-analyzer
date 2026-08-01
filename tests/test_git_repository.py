@@ -10,6 +10,7 @@ import pytest
 from moto import mock_aws
 
 from git_shared.git_repository import GitRepository
+from git_shared.git_providers import mapping_sort_key
 
 
 TABLE_NAME = "TestAnalyticsTable"
@@ -169,7 +170,7 @@ class TestUserMappings:
 
     def test_delete_mapping(self, repo):
         repo.put_user_mapping("u1", {"provider": "github", "gitUsername": "dev-john"})
-        repo.delete_user_mapping("u1", "github", "dev-john")
+        repo.delete_user_mapping("u1", "github")
         assert repo.list_user_mappings("u1") == []
 
     def test_get_all_mappings_for_provider(self, repo):
@@ -181,6 +182,82 @@ class TestUserMappings:
         assert len(github_mappings) == 2
         usernames = {m["gitUsername"] for m in github_mappings}
         assert usernames == {"dev-john", "dev-jane"}
+
+    def test_put_writes_new_sort_key_shape(self, repo, table):
+        """SK is exactly GITMAP#{provider}, with no username suffix."""
+        repo.put_user_mapping("u1", {"provider": "gitlab", "gitUsername": "dev-alice"})
+
+        raw = table.get_item(
+            Key={"PK": "USER#u1", "SK": "GITMAP#gitlab"}
+        ).get("Item")
+        assert raw is not None
+        assert raw["SK"] == mapping_sort_key("gitlab")
+        assert raw["SK"] == "GITMAP#gitlab"
+
+    def test_put_returns_previous_item_on_replacement(self, repo):
+        """Second put for the same (user_id, provider) returns the prior item."""
+        stored_first, previous_first = repo.put_user_mapping(
+            "u1",
+            {
+                "provider": "github",
+                "gitUsername": "dev-john",
+                "createdAt": "2025-01-15T10:00:00Z",
+                "createdBy": "admin-1",
+            },
+        )
+        assert previous_first is None
+        assert stored_first["gitUsername"] == "dev-john"
+
+        stored_second, previous_second = repo.put_user_mapping(
+            "u1",
+            {
+                "provider": "github",
+                "gitUsername": "dev-johnny",
+                "createdAt": "2025-02-01T10:00:00Z",
+                "createdBy": "admin-2",
+            },
+        )
+
+        assert previous_second is not None
+        assert previous_second["gitUsername"] == "dev-john"
+        assert previous_second["createdBy"] == "admin-1"
+
+        assert stored_second["gitUsername"] == "dev-johnny"
+
+        # The stored item after the second write reflects the newest write.
+        mappings = repo.list_user_mappings("u1")
+        assert len(mappings) == 1
+        assert mappings[0]["gitUsername"] == "dev-johnny"
+        assert mappings[0]["createdBy"] == "admin-2"
+
+    def test_delete_mapping_two_argument_signature(self, repo):
+        """delete_user_mapping takes exactly (user_id, provider), no git_username."""
+        repo.put_user_mapping("u1", {"provider": "gitlab", "gitUsername": "dev-bob"})
+
+        # Calling with exactly two positional arguments must succeed.
+        repo.delete_user_mapping("u1", "gitlab")
+
+        assert repo.list_user_mappings("u1") == []
+
+    def test_get_all_mappings_for_provider_excludes_legacy_keyed_item(self, repo, table):
+        """A legacy-keyed item (GITMAP#{provider}#{gitUsername}) is not matched.
+
+        The new exact-equality predicate on ``get_all_mappings_for_provider``
+        must not match items stored under the old Legacy_Mapping_Sort_Key
+        shape. Migration of such items is handled separately by the
+        migrator, not by this read path.
+        """
+        table.put_item(
+            Item={
+                "PK": "USER#u1",
+                "SK": "GITMAP#github#dev-legacy",
+                "provider": "github",
+                "gitUsername": "dev-legacy",
+            }
+        )
+
+        github_mappings = repo.get_all_mappings_for_provider("github")
+        assert github_mappings == []
 
 
 # ------------------------------------------------------------------

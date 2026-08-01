@@ -85,10 +85,6 @@ export default function PromptsTable({ userId, dateRange, onSelectPrompt }: Prom
 
       const response = await get<PromptsListResponse>('/api/prompts', params);
 
-      if (import.meta.env.DEV) {
-        console.log('PromptsTable: fetched prompts count', response.items.length);
-      }
-
       setAllItems(response.items);
       setCurrentPage(1);
     } catch (err) {

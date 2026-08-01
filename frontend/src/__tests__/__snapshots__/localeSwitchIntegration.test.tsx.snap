@@ -1,0 +1,10 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Locale switch integration > renders the Identity Store role ARN field in pt-BR when locale is switched 1`] = `
+{
+  "description": "ARN da IAM Role cross-account usada para ler o IAM Identity Center (vazio = single-account)",
+  "label": "ARN da Role do Identity Store",
+  "placeholder": "ex: arn:aws:iam::222222222222:role/kiro-cost-analyzer-identity-store-read",
+  "save": "Salvar ARN da Role do Identity Store",
+}
+`;

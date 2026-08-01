@@ -34,11 +34,10 @@ import type {
   AppConfig,
   CorrelationAnalysis,
   CorrelationItem,
-  CorrelationStatusSlug,
   ActivityTimelineEntry,
   CategoryDistribution,
 } from '../types';
-import type { TranslationKey } from '../locales/keys';
+import { slugToTranslationKey, slugToAlertType, RETRYABLE_SLUGS, isStatusSlug } from './correlationStatusMaps';
 
 function toDateStr(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -75,47 +74,6 @@ function impactLevelLabel(level: string | null): string {
     case 'low': return 'Low';
     default: return '—';
   }
-}
-
-// ── Slug -> translation key map ─────────────────────────────────────────────
-// Built at module scope so React does not rebuild it on every render.
-const slugToTranslationKey: Record<CorrelationStatusSlug, TranslationKey> = {
-  GIT_MAPPING_MISSING: 'productivity.correlation.status.gitMappingMissing',
-  GITHUB_TOKEN_MISSING: 'productivity.correlation.status.githubTokenMissing',
-  GITHUB_AUTH_FAILED: 'productivity.correlation.status.githubAuthFailed',
-  GITHUB_RATE_LIMIT: 'productivity.correlation.status.githubRateLimit',
-  INSUFFICIENT_DATA: 'productivity.correlation.status.insufficientData',
-  AGENT_TIMEOUT: 'productivity.correlation.status.agentTimeout',
-  AGENT_ERROR: 'productivity.correlation.status.agentError',
-};
-
-// ── Slug -> Cloudscape Alert severity map ──────────────────────────────────
-// Severity follows the design's "Frontend-Level Errors" table:
-//   info    — informational / user can act
-//   warning — actionable, blocks analysis until the user fixes it
-//   error   — the analysis operation actually failed
-const slugToAlertType: Record<CorrelationStatusSlug, 'info' | 'warning' | 'error'> = {
-  GIT_MAPPING_MISSING: 'info',
-  GITHUB_TOKEN_MISSING: 'warning',
-  GITHUB_AUTH_FAILED: 'warning',
-  GITHUB_RATE_LIMIT: 'info',
-  INSUFFICIENT_DATA: 'info',
-  AGENT_TIMEOUT: 'error',
-  AGENT_ERROR: 'error',
-};
-
-// Slugs where retrying makes sense without the user first changing settings.
-// For GIT_MAPPING_MISSING / GITHUB_TOKEN_MISSING / GITHUB_AUTH_FAILED the
-// user must update Settings first, so no refresh action is offered.
-const RETRYABLE_SLUGS: ReadonlySet<CorrelationStatusSlug> = new Set<CorrelationStatusSlug>([
-  'GITHUB_RATE_LIMIT',
-  'INSUFFICIENT_DATA',
-  'AGENT_TIMEOUT',
-  'AGENT_ERROR',
-]);
-
-function isStatusSlug(s: string | undefined): s is CorrelationStatusSlug {
-  return s !== undefined && s !== 'ready' && s !== 'processing' && s in slugToTranslationKey;
 }
 
 export default function UserPage() {

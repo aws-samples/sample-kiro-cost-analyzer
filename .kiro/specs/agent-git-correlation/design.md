@@ -115,7 +115,7 @@ sequenceDiagram
 ```
 agent/app/GitCorrelationAgent/
 ├── main.py                    # @app.entrypoint — AgentCore handler
-├── prompts.py                 # SYSTEM_PROMPT + OUTPUT_SCHEMA
+├── prompts.py                 # SYSTEM_PROMPT + CorrelationAnalysis (structured output model, DD-6)
 ├── tools/
 │   ├── __init__.py
 │   ├── github_tool.py         # @tool get_github_activity
@@ -417,11 +417,13 @@ interface AgentPayload {
 
 *For any* valid JSON string conforming to the OUTPUT_SCHEMA (containing impactScore, impactLevel, correlations, and `insights` as a map with keys `en` and `pt-BR`), `parse_agent_output` SHALL extract all fields correctly, including when the JSON is wrapped in markdown code fences, AND SHALL preserve the bilingual map shape (no flattening to a single list).
 
+`parse_agent_output` and `extract_text_from_result` are retained as tested utility functions but, per DD-6, are no longer on the production `handler` path — the entrypoint now obtains its result via `structured_output_model`, which validates shape at the model-call boundary rather than by parsing free text after the fact.
+
 **Validates: Requirements 2.5, 8.2**
 
 ### Property 5: Fallback on Invalid JSON
 
-*For any* string that is NOT valid JSON (including empty strings, partial JSON, XML, plain text), `parse_agent_output` SHALL raise an exception, and the entrypoint SHALL return a fallback response with `impactScore=null` and an `insights` map of shape `{ en: [str], "pt-BR": [str] }` where both lists are non-empty and have equal length.
+*For any* string that is NOT valid JSON (including empty strings, partial JSON, XML, plain text), `parse_agent_output` SHALL raise an exception. Separately, per DD-6, the entrypoint's actual fallback trigger in production is a `strands.types.exceptions.StructuredOutputException` (raised by the SDK when the model cannot satisfy `CorrelationAnalysis`'s schema after its internal retries) — in either case the entrypoint SHALL return a fallback response with `impactScore=null` and an `insights` map of shape `{ en: [str], "pt-BR": [str] }` where both lists are non-empty and have equal length.
 
 **Validates: Requirements 2.6, 8.2, 8.8**
 
@@ -430,6 +432,12 @@ interface AgentPayload {
 *For any* analysis result (valid or fallback), the `@app.entrypoint` handler SHALL return a string that is parseable as valid JSON.
 
 **Validates: Requirements 2.7**
+
+#### DD-6: `structured_output_model` replaces text-based JSON parsing on the production path
+
+The entrypoint calls `agent(user_prompt, structured_output_model=CorrelationAnalysis)`, where `CorrelationAnalysis` is a Pydantic model in `prompts.py` mirroring `OUTPUT_SCHEMA`'s shape (including the `insights.en` / `insights["pt-BR"]` bilingual map, via a `pt_br` field aliased to the literal key `"pt-BR"`). Strands converts this schema into a tool specification the model is constrained to call, and returns the validated object at `result.structured_output` — never as a text blob the entrypoint must locate and `json.loads`.
+
+This was adopted after a production incident where the model occasionally emitted syntactically invalid JSON (e.g. an unquoted property name) inside its final text response; `parse_agent_output` correctly detected the malformed JSON and the entrypoint correctly returned the fallback response, but that fallback was silently cached and surfaced to the user with no retry affordance (a separate, since-fixed gap in the caller's status-slug handling). The narrower fix here removes the malformed-JSON failure mode itself rather than only detecting it better: `parse_agent_output` and `extract_text_from_result` remain as tested utilities (Properties 4-6 above still hold for them), but the entrypoint no longer depends on them to produce its primary result. The only remaining failure mode on this path is `StructuredOutputException`, raised by the SDK only after its own internal validation retries are exhausted.
 
 ### Property 7: Cache Freshness Logic
 
@@ -488,7 +496,7 @@ interface AgentPayload {
 | GitHub API rate limit (HTTP 429) | Tool returns `{ error: "GITHUB_RATE_LIMIT", retryable: true }`. Agent surfaces it as a parallel insight in both `insights.en` and `insights["pt-BR"]`. | Partial analysis with a parallel-language insight explaining the rate limit. |
 | GitHub auth failure (HTTP 401/403) | Tool returns `{ error: "GITHUB_AUTH_FAILED", retryable: false }`. Agent surfaces it as a parallel insight in both lists. | Analysis with null impactScore and parallel insights directing the user to update the token. |
 | DynamoDB query failure | Tool raises exception. Agent catches and surfaces it as a parallel insight in both lists. | Fallback response with bilingual error insight. |
-| LLM output not valid JSON | `parse_agent_output` raises `JSONDecodeError`. Entrypoint returns fallback with `insights = { en: ["Analysis could not be processed. Please try again."], "pt-BR": ["Não foi possível processar a análise. Tente novamente."] }`. | Response with impactScore=null and bilingual generic error insight. |
+| LLM cannot satisfy the structured output schema | `agent(..., structured_output_model=CorrelationAnalysis)` raises `StructuredOutputException` after the SDK's internal validation retries are exhausted (see DD-6). Entrypoint returns fallback with `insights = { en: ["Analysis could not be processed. Please try again."], "pt-BR": ["Não foi possível processar a análise. Tente novamente."] }`. | Response with impactScore=null and bilingual generic error insight. |
 | LLM timeout (model latency) | AgentCore handles internally. If total exceeds 60s, backend times out. | HTTP 503 to frontend with `status="AGENT_TIMEOUT"`. |
 
 ### Backend-Level Errors

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 import time
-import traceback
 
 from shared.analytics_writer import AnalyticsWriter
 from shared.categories import CATEGORY_NOT_CATEGORIZED
@@ -56,9 +55,9 @@ def writer_handler(event, context):  # noqa: ARG001 - Lambda handler contract re
     try:
         for record in records:
             if file_type == "csv":
-                items_written += _write_csv_record(writer, record)
+                items_written += _write_csv_record(writer, record, logger)
             elif file_type == "prompt":
-                items_written += _write_prompt_record(writer, record)
+                items_written += _write_prompt_record(writer, record, logger)
             else:
                 raise ValueError(f"Unknown fileType: {file_type}")
 
@@ -80,20 +79,22 @@ def writer_handler(event, context):  # noqa: ARG001 - Lambda handler contract re
         }
 
     except Exception as exc:
+        # errorMessage/stackTrace deliberately omitted: records processed
+        # here can carry user-submitted prompt/response content, which an
+        # exception message or traceback could echo back. Only the
+        # exception's class name is logged.
         duration_ms = int((time.time() - start) * 1000)
         logger.error(
             "Write failed",
             s3Key=key,
             fileType=file_type,
             errorType=type(exc).__name__,
-            errorMessage=str(exc),
-            stackTrace=traceback.format_exc(),
             durationMs=duration_ms,
         )
         raise
 
 
-def _write_csv_record(writer: AnalyticsWriter, record: dict) -> int:
+def _write_csv_record(writer: AnalyticsWriter, record: dict, logger: StructuredLogger) -> int:
     """Write a single CSV activity record. Returns number of items written."""
     user_id = record["userId"]
     date = record["date"]
@@ -135,10 +136,12 @@ def _write_csv_record(writer: AnalyticsWriter, record: dict) -> int:
     try:
         writer.upsert_activity_summary(user_id, date)
         items += 1
-    except Exception:
-        print(
-            f"[WARN] upsert_activity_summary failed for user={user_id} date={date}: "
-            f"{traceback.format_exc()}"
+    except Exception as exc:
+        logger.error(
+            "upsert_activity_summary failed",
+            userId=user_id,
+            date=date,
+            errorType=type(exc).__name__,
         )
 
     # Persist model messages and newUser metadata (best-effort)
@@ -148,16 +151,18 @@ def _write_csv_record(writer: AnalyticsWriter, record: dict) -> int:
         try:
             writer.set_daily_stats_metadata(user_id, date, model_messages, new_user)
             items += 1
-        except Exception:
-            print(
-                f"[WARN] set_daily_stats_metadata failed for user={user_id} date={date}: "
-                f"{traceback.format_exc()}"
+        except Exception as exc:
+            logger.error(
+                "set_daily_stats_metadata failed",
+                userId=user_id,
+                date=date,
+                errorType=type(exc).__name__,
             )
 
     return items
 
 
-def _write_prompt_record(writer: AnalyticsWriter, record: dict) -> int:
+def _write_prompt_record(writer: AnalyticsWriter, record: dict, logger: StructuredLogger) -> int:
     """Write a single prompt record. Returns number of items written."""
     user_id = record["userId"]
     date = record.get("date", record.get("timestamp", "")[:10])
@@ -202,10 +207,12 @@ def _write_prompt_record(writer: AnalyticsWriter, record: dict) -> int:
     try:
         writer.upsert_activity_summary(user_id, date)
         items += 1
-    except Exception:
-        print(
-            f"[WARN] upsert_activity_summary failed for user={user_id} date={date}: "
-            f"{traceback.format_exc()}"
+    except Exception as exc:
+        logger.error(
+            "upsert_activity_summary failed",
+            userId=user_id,
+            date=date,
+            errorType=type(exc).__name__,
         )
 
     return items

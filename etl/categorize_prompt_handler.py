@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import os
-import traceback
 
 import boto3
 from prompt_categorizer import PromptCategorizer
@@ -156,14 +155,19 @@ def categorize_prompt_handler(event, context):  # noqa: ARG001 - Lambda handler 
         }
 
     except Exception as exc:
+        # errorMessage/stackTrace deliberately omitted: this handler
+        # processes prompt content that may contain user-submitted PII,
+        # and an exception message or traceback can echo that content
+        # back (e.g. a ValueError including the offending string). Only
+        # identifiers and the exception's class name are logged. Step
+        # Functions' own execution history retains the full traceback
+        # for debugging.
         logger.error(
             "Failed to categorize prompt",
             requestId=request_id,
             PK=pk,
             SK=sk,
             errorType=type(exc).__name__,
-            errorMessage=str(exc),
-            stackTrace=traceback.format_exc(),
         )
         # Propagate exception so Step Functions can retry with backoff
         raise

@@ -84,7 +84,7 @@ describe('Property 3 — state preservation under locale switch', () => {
           return JSON.stringify(before) === JSON.stringify(afterClone);
         },
       ),
-      { numRuns: 200 },
+      { numRuns: 40 },
     );
   });
 

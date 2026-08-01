@@ -66,3 +66,64 @@ class TestStructuredLogger:
         entry = self._capture(logger.info, "with date", when=datetime(2025, 1, 15, tzinfo=timezone.utc))
 
         assert "2025-01-15" in entry["when"]
+
+
+class TestStructuredLoggerRedaction:
+    """Sensitive-looking field names are redacted; ordinary ones pass through."""
+
+    def _capture(self, logger_method, message, **kwargs):
+        with patch("builtins.print") as mock_print:
+            logger_method(message, **kwargs)
+        output = mock_print.call_args[0][0]
+        return json.loads(output)
+
+    def test_token_field_is_redacted(self):
+        logger = StructuredLogger("redact-lambda")
+        entry = self._capture(logger.error, "auth failed", token="abc123secretvalue")
+
+        assert entry["token"] == "[REDACTED]"
+
+    def test_password_field_is_redacted(self):
+        logger = StructuredLogger("redact-lambda")
+        entry = self._capture(logger.error, "login failed", password="hunter2")
+
+        assert entry["password"] == "[REDACTED]"
+
+    def test_secret_field_is_redacted(self):
+        logger = StructuredLogger("redact-lambda")
+        entry = self._capture(logger.error, "boom", clientSecret="s3cr3t")
+
+        assert entry["clientSecret"] == "[REDACTED]"
+
+    def test_authorization_field_is_redacted(self):
+        logger = StructuredLogger("redact-lambda")
+        entry = self._capture(logger.info, "request", authorizationHeader="Bearer xyz")
+
+        assert entry["authorizationHeader"] == "[REDACTED]"
+
+    def test_case_insensitive_match(self):
+        logger = StructuredLogger("redact-lambda")
+        entry = self._capture(logger.error, "boom", ApiKey="k-123")
+
+        assert entry["ApiKey"] == "[REDACTED]"
+
+    def test_ordinary_fields_are_not_redacted(self):
+        logger = StructuredLogger("redact-lambda")
+        entry = self._capture(
+            logger.info,
+            "processed",
+            recordCount=42,
+            s3Key="prompts/file.json",
+            errorType="ValueError",
+        )
+
+        assert entry["recordCount"] == 42
+        assert entry["s3Key"] == "prompts/file.json"
+        assert entry["errorType"] == "ValueError"
+
+    def test_required_fields_are_never_redacted(self):
+        """correlationId must survive even if a caller never overrides it."""
+        logger = StructuredLogger("redact-lambda", "corr-token-123")
+        entry = self._capture(logger.info, "hello")
+
+        assert entry["correlationId"] == "corr-token-123"

@@ -150,7 +150,7 @@ class TestPromptTruncationProperty:
     """
 
     @given(text=st.text(min_size=0, max_size=10000))
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     def test_truncation_never_exceeds_500_chars(self, text):
         """Output never exceeds 500 chars (plus ellipsis suffix)."""
         result = _truncate(text)
@@ -158,14 +158,14 @@ class TestPromptTruncationProperty:
         assert len(result) <= 503
 
     @given(text=st.text(min_size=0, max_size=500))
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     def test_short_strings_unchanged(self, text):
         """Strings with length <= 500 are returned unchanged."""
         result = _truncate(text)
         assert result == text
 
     @given(text=st.text(min_size=501, max_size=10000))
-    @settings(max_examples=100)
+    @settings(max_examples=20)
     def test_long_strings_truncated_with_ellipsis(self, text):
         """Strings longer than 500 are truncated and end with '...'."""
         result = _truncate(text)

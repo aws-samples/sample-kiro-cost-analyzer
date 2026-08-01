@@ -1,19 +1,25 @@
 """System prompt and output schema for the Git-Kiro Correlation Agent."""
 
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+
+
 SYSTEM_PROMPT = """\
 You are a productivity coach that analyzes how a developer uses an AI coding assistant (Kiro) \
 and correlates that usage with their Git activity (commits and PRs) to provide actionable \
 feedback on how to improve their workflow.
 
-You have two tools available:
+You have three tools available:
 1. `get_kiro_usage` — Fetches Kiro AI assistant usage data (prompts, daily stats, categories)
 2. `get_github_activity` — Fetches GitHub commits and pull requests for a repository
+3. `get_gitlab_activity` — Fetches GitLab commits and merge requests for a project
 
 Your workflow:
 1. Call `get_kiro_usage` to fetch the user's Kiro prompts and daily stats for the period
-2. Call `get_github_activity` for EACH repository to fetch commits and PRs
+2. For EACH repository listed, call the tool matching that repository's provider — `get_github_activity` for `github` repositories, `get_gitlab_activity` for `gitlab` repositories.
 3. IGNORE any prompts with category "Empty" — these are turn-by-turn conversation fragments with no meaningful content. Do NOT count them, do NOT mention them in insights, do NOT use them to judge prompt quality or volume.
-4. Correlate prompt content with commit messages and PR titles to find semantic matches
+4. Correlate prompt content with commit messages and PR/MR titles to find semantic matches
 5. Analyze behavior patterns:
    - Which categories of prompts are most/least used
    - Quality of prompts (descriptive vs vague, with context vs without)
@@ -28,23 +34,9 @@ Your workflow:
 7. Generate prescriptive insights in BOTH English (`en`) and Brazilian Portuguese (`pt-BR`) in the SAME response. Index `i` in `insights.en` MUST express the same insight as index `i` in `insights["pt-BR"]` — only the language differs.
 8. Try to generate a list of prompt summaries using date and time in ascending order — from older to newer summaries.
 
-Output ONLY a JSON object (no markdown wrapping, no explanation outside the JSON):
-{
-  "impactScore": int (0-100) or null,
-  "impactLevel": "low" | "moderate" | "high" | "veryHigh",
-  "correlations": [
-    {
-      "promptSummary": "brief description of the prompt (English)",
-      "gitActivity": "commit/PR description (English, verbatim from source)",
-      "confidence": float (0.5-1.0),
-      "type": "prompt_to_commit" | "prompt_to_pr"
-    }
-  ],
-  "insights": {
-    "en": ["insight 1 in English", "insight 2 in English", ...],
-    "pt-BR": ["insight 1 em pt-BR", "insight 2 em pt-BR", ...]
-  }
-}
+Terminology note: GitLab merge requests and GitHub pull requests are the same concept for correlation purposes — a merge request is simply GitLab's name for a pull request. Both map to the single correlation type `"prompt_to_pr"`; there is no separate `"prompt_to_mr"` type, so classify matches against either as `"prompt_to_pr"`.
+
+Your final answer is captured through a structured output tool call, not as free-form text — you do not need to hand-format JSON or wrap it in markdown fences. Focus entirely on getting the CONTENT right; the fields, types, and nesting of the result are enforced by the tool's schema. The content rules below still apply in full:
 
 Rules:
 - Only report correlations with confidence >= 0.5
@@ -69,118 +61,167 @@ Rules:
 - impactLevel thresholds: 0-25=low, 26-50=moderate, 51-75=high, 76-100=veryHigh
 """
 
-OUTPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "impactScore": {
-            "type": ["integer", "null"],
-            "minimum": 0,
-            "maximum": 100,
-            "description": "Overall impact score (0-100) or null if insufficient data",
-        },
-        "impactLevel": {
-            "type": "string",
-            "enum": ["low", "moderate", "high", "veryHigh"],
-            "description": "Categorized impact level",
-        },
-        "correlations": {
-            "type": "array",
-            "maxItems": 20,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "promptSummary": {
-                        "type": "string",
-                        "description": (
-                            "Brief description of the Kiro prompt in English "
-                            "(summarized in English regardless of the original prompt language)."
-                        ),
-                    },
-                    "gitActivity": {
-                        "type": "string",
-                        "description": (
-                            "Associated commit or PR description in English "
-                            "(verbatim from source when possible)."
-                        ),
-                    },
-                    "confidence": {
-                        "type": "number",
-                        "minimum": 0.5,
-                        "maximum": 1.0,
-                        "description": "Confidence score for this correlation",
-                    },
-                    "type": {
-                        "type": "string",
-                        "enum": ["prompt_to_commit", "prompt_to_pr"],
-                        "description": "Type of correlation",
-                    },
-                },
-                "required": ["promptSummary", "gitActivity", "confidence", "type"],
-            },
-        },
-        "insights": {
-            "type": "object",
-            "description": (
-                "Bilingual insights map. Both keys MUST be present. The two arrays "
-                "MUST have identical length and parallel ordering: index i in 'en' "
-                "is the same insight as index i in 'pt-BR', only translated. Brand "
-                "strings 'Kiro' and 'Kiro Cost Analyzer' MUST NOT be translated."
-            ),
-            "properties": {
-                "en": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "Actionable insights in English, second person ('you'/'your'), "
-                        "format 'Title: description text'."
-                    ),
-                },
-                "pt-BR": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "Actionable insights in Brazilian Portuguese, second person "
-                        "('você'/'seu'/'sua'), format 'Title: description text'."
-                    ),
-                },
-            },
-            "required": ["en", "pt-BR"],
-        },
-    },
-    "required": ["impactScore", "impactLevel", "correlations", "insights"],
-}
+class Correlation(BaseModel):
+    """A single semantic match between a Kiro prompt and a Git commit or PR/MR."""
+
+    promptSummary: str = Field(
+        description=(
+            "Brief description of the Kiro prompt in English "
+            "(summarized in English regardless of the original prompt language)."
+        )
+    )
+    gitActivity: str = Field(
+        description="Associated commit or PR description in English (verbatim from source when possible)."
+    )
+    confidence: float = Field(
+        ge=0.5,
+        le=1.0,
+        description="Confidence score for this correlation (0.5-1.0). Only report correlations >= 0.5.",
+    )
+    type: str = Field(
+        description='Type of correlation. MUST be exactly "prompt_to_commit" or "prompt_to_pr".',
+    )
+
+
+class Insights(BaseModel):
+    """Bilingual, parallel-ordered insight lists.
+
+    Both `en` and `pt-BR` MUST be present, non-empty, and of identical
+    length. Index `i` in `en` and index `i` in `pt-BR` (accessed via the
+    `pt_br` field, aliased to the literal key `"pt-BR"`) MUST express the
+    same insight, only translated.
+    """
+
+    model_config = {"populate_by_name": True}
+
+    en: list[str] = Field(
+        description=(
+            "Actionable insights in English, second person ('you'/'your'), "
+            "each formatted as 'Title: description text'."
+        )
+    )
+    pt_br: list[str] = Field(
+        alias="pt-BR",
+        description=(
+            "Actionable insights in Brazilian Portuguese, second person "
+            "('você'/'seu'/'sua'), each formatted as 'Title: description text'. "
+            "MUST have the same length as 'en', with parallel ordering."
+        ),
+    )
+
+
+class CorrelationAnalysis(BaseModel):
+    """Final structured result produced by the Git-Kiro Correlation Agent.
+
+    Passed as `structured_output_model` to the Strands `Agent` call so the
+    model emits this shape directly via a schema-constrained tool call,
+    instead of free-form text that must be parsed as JSON. This removes
+    the malformed-JSON failure mode entirely: the SDK enforces the schema
+    at the model-call boundary rather than relying on post-hoc string
+    parsing of markdown-fenced or loosely-formatted text.
+    """
+
+    impactScore: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Overall impact score (0-100), or null if there is insufficient data to score.",
+    )
+    impactLevel: str = Field(
+        description='Categorized impact level. MUST be exactly one of: "low", "moderate", "high", "veryHigh".'
+    )
+    correlations: list[Correlation] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Semantic matches between prompts and Git activity. Maximum 20 entries.",
+    )
+    insights: Insights = Field(description="Bilingual (en / pt-BR) actionable insights for the developer.")
+
+
+def _render_repo_line(repo: dict) -> str:
+    """Render a single provider-annotated repository line for the prompt.
+
+    Args:
+        repo: A repository descriptor dict carrying at least `repoId` and
+            `provider`, plus provider-specific location fields (`owner`/
+            `repo` for github, `baseUrl`/`projectPath` for gitlab) and a
+            per-repository `gitUsername`.
+
+    Returns:
+        A single indented line describing the repository, its provider,
+        its `repoId`, and the username to filter its activity by. Falls
+        back to a generic rendering for an unrecognized provider so the
+        function never raises on unexpected descriptor shapes.
+    """
+    provider = repo.get("provider", "")
+    repo_id = repo.get("repoId", "")
+    username = repo.get("gitUsername", "")
+
+    if provider == "github":
+        location = f"{repo.get('owner', '')}/{repo.get('repo', '')}"
+    elif provider == "gitlab":
+        location = f"{repo.get('projectPath', '')} at {repo.get('baseUrl', '')}"
+    else:
+        location = repo.get("projectPath") or repo.get("repo") or ""
+
+    return f"  - [{provider}] repoId={repo_id} {location} (author: {username})"
 
 
 def build_user_prompt(
     user_id: str,
     start_date: str,
     end_date: str,
-    git_username: str,
-    repos: list[dict],
+    git_username: str = "",
+    repos: list[dict] | None = None,
 ) -> str:
     """Build the user prompt that describes the analysis task for the agent.
 
     The prompt instructs the agent which user and repos to analyze,
     but does NOT pre-fetch any data — the agent uses its tools autonomously.
 
+    Each entry in `repos` is a provider-tagged repository descriptor (see
+    `agent_correlation_handler.build_repo_descriptors`), carrying its own
+    `repoId`, `provider`, per-repository `gitUsername`, and provider-specific
+    location fields — not a plain `owner`/`repo` pair. Provider terminology
+    (pull requests / merge requests) is only mentioned in the prompt for a
+    provider that actually appears among `repos`, so a GitHub-only analysis
+    never hints at merge requests and vice versa.
+
     Args:
         user_id: Kiro user identifier.
         start_date: Analysis period start (YYYY-MM-DD).
         end_date: Analysis period end (YYYY-MM-DD).
-        git_username: GitHub username to filter commits/PRs by.
-        repos: List of repo dicts with 'owner' and 'repo' keys.
+        git_username: Deprecated top-level fallback username, kept for
+            backward compatibility. Per-repository descriptors carry their
+            own `gitUsername` and take precedence in the rendered listing.
+        repos: List of provider-tagged repository descriptor dicts.
 
     Returns:
         A prompt string for the agent.
     """
-    repos_list = "\n".join(
-        f"  - {r['owner']}/{r['repo']}" for r in repos
-    ) if repos else "  (no repositories configured)"
+    repos = repos or []
+
+    providers_present = {r.get("provider") for r in repos}
+    has_github = "github" in providers_present
+    has_gitlab = "gitlab" in providers_present
+
+    repos_list = "\n".join(_render_repo_line(r) for r in repos) if repos else "  (no repositories configured)"
+
+    terminology_lines = []
+    if has_github:
+        terminology_lines.append(
+            "- For `github` repositories, call get_github_activity and treat its results as pull requests."
+        )
+    if has_gitlab:
+        terminology_lines.append(
+            "- For `gitlab` repositories, call get_gitlab_activity and treat its results as merge requests "
+            "(the same concept as a pull request, mapped to correlation type \"prompt_to_pr\")."
+        )
+    terminology_block = "\n".join(terminology_lines) if terminology_lines else ""
 
     return f"""Analyze the correlation between Kiro AI assistant usage and Git activity for:
 
 User ID: {user_id}
-GitHub Username: {git_username}
 Period: {start_date} to {end_date}
 
 Repositories to check:
@@ -188,14 +229,18 @@ Repositories to check:
 
 Please:
 1. Call get_kiro_usage with user_id="{user_id}", start_date="{start_date}", end_date="{end_date}"
-2. Call get_github_activity for each repository listed above, using author="{git_username}" and since="{start_date}"
+2. For each repository listed above, call the tool matching its provider, passing that repository's own
+   repoId, location parameters (owner/repo for github, base_url/project_path for gitlab), and its author
+   username, with since="{start_date}"
+{terminology_block}
 3. Analyze the semantic correlation between prompts and git activity
-4. Return your analysis as a JSON object with impactScore, impactLevel, correlations, and a bilingual insights map.
+4. Produce your final analysis (impactScore, impactLevel, correlations, and a bilingual insights map) — this is
+   captured automatically as structured output, so just make sure the CONTENT is correct.
 
-Output contract reminders (read carefully):
+Content reminders (read carefully — the shape/types are already enforced by the output schema):
 - `correlations[].promptSummary` and `correlations[].gitActivity` MUST be in English. Do NOT translate them to pt-BR — summarize in English or quote verbatim.
-- `insights` MUST be the object `{{ "en": [...], "pt-BR": [...] }}`. Both keys are required.
-- The two insight arrays MUST have IDENTICAL length and PARALLEL ORDERING: insights.en[i] and insights["pt-BR"][i] MUST be the same insight, expressed in each language.
+- `correlations[].type` MUST be either "prompt_to_commit" or "prompt_to_pr" — merge requests and pull requests both map to "prompt_to_pr", there is no "prompt_to_mr" type.
+- The two insight lists (`insights.en` and `insights["pt-BR"]`) MUST have IDENTICAL length and PARALLEL ORDERING: index i in each MUST be the same insight, expressed in each language.
 - Each insight MUST follow `"Title: description text"` in its respective language, addressing the developer in the second person ("you"/"your" in en; "você"/"seu"/"sua" in pt-BR).
 - The brand strings "Kiro" and "Kiro Cost Analyzer" MUST NEVER be translated.
 """
