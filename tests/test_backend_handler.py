@@ -50,11 +50,11 @@ def _make_event(
 
 class TestExtractClaims:
     def test_extracts_sub_and_groups(self):
-        event = _make_event(groups="Admins,Viewers", sub="abc-123", username="admin@co.com")
+        event = _make_event(groups="Admins,Viewers", sub="abc-123", username="admin@example.com")
         claims = _extract_claims(event)
         assert claims["userId"] == "abc-123"
         assert claims["groups"] == ["Admins", "Viewers"]
-        assert claims["username"] == "admin@co.com"
+        assert claims["username"] == "admin@example.com"
 
     def test_empty_groups(self):
         event = _make_event(groups="", sub="u1")
@@ -426,13 +426,13 @@ class TestPostUsers:
     @patch("backend.handler.users_handler")
     def test_admin_can_create_user(self, mock_mod):
         mock_mod.handle_create_user.return_value = {"status": "created"}
-        event = _make_event("POST", "/api/users", body={"email": "a@b.com"}, groups="Admins")
+        event = _make_event("POST", "/api/users", body={"email": "user@example.com"}, groups="Admins")
         resp = lambda_handler(event, None)
         assert resp["statusCode"] == 200
-        mock_mod.handle_create_user.assert_called_once_with({"email": "a@b.com"})
+        mock_mod.handle_create_user.assert_called_once_with({"email": "user@example.com"})
 
     def test_non_admin_gets_403(self):
-        event = _make_event("POST", "/api/users", body={"email": "a@b.com"}, groups="")
+        event = _make_event("POST", "/api/users", body={"email": "user@example.com"}, groups="")
         resp = lambda_handler(event, None)
         assert resp["statusCode"] == 403
 

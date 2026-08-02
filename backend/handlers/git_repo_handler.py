@@ -148,7 +148,10 @@ def handle_create_repo(
             "_status_code": 500,
         }
 
-    logger.info("Git repository created", repoId=repo_id, provider=provider, url=url)
+    # `url` deliberately omitted: it can carry internal hostnames, project
+    # or organization names, or other topology details that should not
+    # appear in logs. repoId is sufficient to look the config up.
+    logger.info("Git repository created", repoId=repo_id, provider=provider)
 
     return {
         "repoId": repo_id,

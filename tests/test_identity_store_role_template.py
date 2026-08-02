@@ -281,6 +281,59 @@ def test_trust_policy_is_pinned_to_kiro_account_id(role_resource: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_policy_resource_is_scoped_to_configured_identity_store(
+    template: dict,
+) -> None:
+    """Resource is scoped to IdentityStoreId, not a wildcard "*".
+
+    identitystore:DescribeUser and identitystore:ListUsers support
+    resource-level permissions (per the AWS Identity Store service
+    authorization reference and the AWS-managed
+    AWSIdentityCenterExternalManagementPolicy, which uses the same ARN
+    shapes). Granting "*" would permit access to every identity store in
+    the account, not just the one this role is meant to read from.
+    """
+    statements = _managed_policy_statements(template)
+    allow_stmts = [s for s in statements if s.get("Effect") == "Allow"]
+    assert allow_stmts, "Managed policy must contain an Allow statement"
+
+    resource = allow_stmts[0].get("Resource")
+    assert resource != "*", (
+        "Resource must not be a bare wildcard; it must be scoped to "
+        "IdentityStoreId"
+    )
+
+    resources = resource if isinstance(resource, list) else [resource]
+
+    # The identitystore/{id} ARN, parameterized by IdentityStoreId.
+    identitystore_arns = [
+        r for r in resources
+        if isinstance(r, dict) and "Fn::Sub" in r and "identitystore/" in r["Fn::Sub"]
+    ]
+    assert identitystore_arns, (
+        f"Resource must include an identitystore/{{IdentityStoreId}} ARN; got {resources!r}"
+    )
+    assert "${IdentityStoreId}" in identitystore_arns[0]["Fn::Sub"], (
+        "The identitystore ARN must be parameterized by IdentityStoreId; "
+        f"got {identitystore_arns[0]!r}"
+    )
+
+    # The required companion user/* ARN (a fixed string, no parameters).
+    assert "arn:aws:identitystore:::user/*" in resources, (
+        f"Resource must include the required user/* ARN; got {resources!r}"
+    )
+
+
+def test_identity_store_id_parameter_has_no_default(template: dict) -> None:
+    """IdentityStoreId is required (no Default), since the policy now depends on it."""
+    parameters = template.get("Parameters") or {}
+    assert "IdentityStoreId" in parameters, "Template must define IdentityStoreId"
+    assert "Default" not in parameters["IdentityStoreId"], (
+        "IdentityStoreId must not have a Default now that the IAM policy "
+        "resource scoping depends on a real value being supplied"
+    )
+
+
 def test_outputs_identity_store_role_arn_is_exported(template: dict) -> None:
     """``Outputs.IdentityStoreRoleArn`` is defined and exported by stack name."""
     outputs = template.get("Outputs") or {}

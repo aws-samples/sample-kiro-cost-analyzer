@@ -222,10 +222,13 @@ IDC_ROLE_STACK_NAME ?= kiro-identity-store-role
 ## Deploy the cross-account Identity Store IAM Role in the IDC account
 deploy-identity-store-role:
 ifndef IDC_ACCOUNT_PROFILE
-	$(error IDC_ACCOUNT_PROFILE is required. Usage: make deploy-identity-store-role IDC_ACCOUNT_PROFILE=profile KIRO_ACCOUNT_ID=123456789012 [IDENTITY_STORE_ID=d-1234567890])
+	$(error IDC_ACCOUNT_PROFILE is required. Usage: make deploy-identity-store-role IDC_ACCOUNT_PROFILE=profile KIRO_ACCOUNT_ID=123456789012 IDENTITY_STORE_ID=d-1234567890)
 endif
 ifndef KIRO_ACCOUNT_ID
-	$(error KIRO_ACCOUNT_ID is required. Usage: make deploy-identity-store-role IDC_ACCOUNT_PROFILE=profile KIRO_ACCOUNT_ID=123456789012 [IDENTITY_STORE_ID=d-1234567890])
+	$(error KIRO_ACCOUNT_ID is required. Usage: make deploy-identity-store-role IDC_ACCOUNT_PROFILE=profile KIRO_ACCOUNT_ID=123456789012 IDENTITY_STORE_ID=d-1234567890)
+endif
+ifndef IDENTITY_STORE_ID
+	$(error IDENTITY_STORE_ID is required — it scopes the IAM policy's Resource element to this specific identity store. Usage: make deploy-identity-store-role IDC_ACCOUNT_PROFILE=profile KIRO_ACCOUNT_ID=123456789012 IDENTITY_STORE_ID=d-1234567890)
 endif
 	@echo "🔐 Deploying cross-account Identity Store IAM Role in the IDC account..."
 	aws cloudformation deploy \

@@ -1913,6 +1913,17 @@ Resources:
               # feedback this endpoint exists to provide. Access is still
               # read-only (list only, no object read/write) and gated behind the
               # Admins group check in `backend/handler.py`.
+              #
+              # TODO: remove the "reconfigure source bucket" UI/API entirely
+              # (Settings page bucket field, PUT /api/config/bucket,
+              # handle_put_config_bucket) and this ValidateSourceBucket
+              # statement along with it. Changing the source bucket after
+              # deploy is expected to be rare in practice; a redeploy with a
+              # new SourceBucketName parameter is an acceptable path for the
+              # few who need it, and removing the hot-swap feature removes
+              # this wildcard grant rather than just documenting it as
+              # accepted. Decided 2026-08-01 — see docs/security.md and
+              # docs/changelog.md for the same note.
               Resource: "arn:aws:s3:::*"
             - Sid: DynamoDBReadAccess
               Effect: Allow

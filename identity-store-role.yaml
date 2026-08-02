@@ -13,11 +13,12 @@ Parameters:
 
   IdentityStoreId:
     Type: String
-    Default: ""
+    AllowedPattern: "d-[0-9a-z]{10}"
+    ConstraintDescription: Must be a valid Identity Store ID (e.g. d-1234567890)
     Description: >
-      IAM Identity Center Identity Store ID (e.g. d-1234567890).
-      Informational only — identitystore APIs do not support resource-level
-      permissions, so this parameter is not used in the IAM policy.
+      IAM Identity Center Identity Store ID (e.g. d-1234567890). Used to
+      scope the IAM policy's Resource element to this specific identity
+      store rather than every identity store in the account.
 
 Resources:
   IdentityStoreReadPolicy:
@@ -33,7 +34,15 @@ Resources:
             Action:
               - identitystore:DescribeUser
               - identitystore:ListUsers
-            Resource: "*"
+            # Scoped to the specific identity store rather than "*" (every
+            # identity store in the account). Both resource types are
+            # required together per the AWS Identity Store service
+            # authorization reference: the identitystore/{id} resource
+            # scopes which store, and the wildcard user/* resource is
+            # required because these actions operate over its users.
+            Resource:
+              - !Sub "arn:aws:identitystore::${AWS::AccountId}:identitystore/${IdentityStoreId}"
+              - "arn:aws:identitystore:::user/*"
 
   CrossAccountIdentityStoreRole:
     Type: AWS::IAM::Role

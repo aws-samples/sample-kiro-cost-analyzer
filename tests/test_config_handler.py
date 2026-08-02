@@ -342,7 +342,7 @@ class TestHandlePutConfigPromptHistoryEnabled:
         "SSM_PROMPT_HISTORY_ENABLED": "/kiro-cost-analyzer/prompt-history-enabled",
     }, clear=False)
     def test_does_not_log_ssm_parameter_value(self, capsys):
-        """Verify that the SSM parameter value is never logged (Requirement 9.2)."""
+        """Verify that neither the SSM parameter path nor its value are ever logged (Requirement 9.2)."""
         ssm = MagicMock()
 
         handle_put_config_prompt_history_enabled(
@@ -350,10 +350,45 @@ class TestHandlePutConfigPromptHistoryEnabled:
         )
 
         captured = capsys.readouterr()
-        # The value "true" or "false" should not appear as a logged SSM value
-        # We check that the SSM parameter path is not logged
-        assert "/kiro-cost-analyzer/prompt-history-enabled" not in captured.out
-        assert "/kiro-cost-analyzer/prompt-history-enabled" not in captured.err
+        all_output = captured.out + captured.err
+
+        # The SSM parameter path must not be logged.
+        assert "/kiro-cost-analyzer/prompt-history-enabled" not in all_output
+
+        # The SSM parameter VALUE ("true"/"false") must not be logged either.
+        # Parse each JSON log line and check no field carries the literal
+        # SSM value — a bare substring check for "true"/"false" would also
+        # match unrelated JSON booleans (e.g. the response's own "enabled"
+        # field), so this asserts on the specific fields the handler emits.
+        for line in all_output.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+            assert entry.get("value") not in ("true", "false")
+            assert entry.get("ssmValue") not in ("true", "false")
+            assert "Value" not in entry
+
+    def test_does_not_log_ssm_parameter_value_when_disabling(self, capsys):
+        """Same guarantee as above, exercised with enabled=False (Value="false")."""
+        ssm = MagicMock()
+
+        handle_put_config_prompt_history_enabled(
+            {"enabled": False}, ssm_client=ssm
+        )
+
+        captured = capsys.readouterr()
+        all_output = captured.out + captured.err
+
+        assert "/kiro-cost-analyzer/prompt-history-enabled" not in all_output
+        for line in all_output.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+            assert entry.get("value") not in ("true", "false")
+            assert entry.get("ssmValue") not in ("true", "false")
+            assert "Value" not in entry
 
 
 class TestHandlePutConfigBucket:
