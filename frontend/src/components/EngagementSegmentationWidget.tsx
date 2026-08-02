@@ -8,7 +8,7 @@ import Header from '@cloudscape-design/components/header';
 import Link from '@cloudscape-design/components/link';
 import PieChart from '@cloudscape-design/components/pie-chart';
 import SpaceBetween from '@cloudscape-design/components/space-between';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 import { useI18n } from '../i18n/useI18n';
 import { get, ApiError } from '../api/client';
 import type { EngagementResponse } from '../types';

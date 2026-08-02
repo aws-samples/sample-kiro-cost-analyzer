@@ -3,7 +3,7 @@ import Header from '@cloudscape-design/components/header';
 import Box from '@cloudscape-design/components/box';
 import Link from '@cloudscape-design/components/link';
 import Badge from '@cloudscape-design/components/badge';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { useI18n } from '../i18n/useI18n';
 import type { InactiveSubscriber, InactiveSummary } from '../types';
 

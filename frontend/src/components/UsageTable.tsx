@@ -9,7 +9,7 @@ import Badge from '@cloudscape-design/components/badge';
 import Popover from '@cloudscape-design/components/popover';
 import Select, { type SelectProps } from '@cloudscape-design/components/select';
 import SpaceBetween from '@cloudscape-design/components/space-between';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { useI18n } from '../i18n/useI18n';
 import { get } from '../api/client';
 import TierBadge from './TierBadge';

@@ -10,7 +10,7 @@ import Select, { type SelectProps } from '@cloudscape-design/components/select';
 import Box from '@cloudscape-design/components/box';
 import Badge from '@cloudscape-design/components/badge';
 import Link from '@cloudscape-design/components/link';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { get, ApiError } from '../api/client';
 import { useI18n } from '../i18n/useI18n';
 import SkeletonLoader from './SkeletonLoader';

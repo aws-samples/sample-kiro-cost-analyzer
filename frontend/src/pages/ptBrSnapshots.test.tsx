@@ -20,7 +20,7 @@
 
 import { act, render } from '@testing-library/react';
 import { beforeEach, beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import type { ReactNode } from 'react';
 import { I18nProvider } from '../i18n/I18nProvider';
 import { i18n } from '../i18n/index';

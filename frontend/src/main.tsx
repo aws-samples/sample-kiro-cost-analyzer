@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter } from 'react-router';
 import '@cloudscape-design/global-styles/index.css';
 import './index.css';
 // Side-effect import: initializes the shared i18next instance before any

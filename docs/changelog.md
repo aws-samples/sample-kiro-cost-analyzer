@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+### Security — Migrated `react-router-dom` to `react-router@8.3.0`, closing the RSC CSRF advisory
+
+- **Root cause fix, not a documented exception.** The previous release (see v3.3 below) documented GHSA-qwww-vcr4-c8h2 as a non-applicable `npm audit` finding because `react-router-dom` had not yet published an `8.x` build depending on the patched `react-router@8.3.0`. It has not since — `react-router-dom` stopped publishing at `7.18.2`; from `8.x` onward, the project consolidated into a single `react-router` package. Migrated `frontend/package.json` from `react-router-dom@^7.18.2` to `react-router@^8.3.0` and updated every import (`App.tsx`, `main.tsx`, 4 components, 8 pages, 3 test files — 16 files total) from `'react-router-dom'` to `'react-router'`. All exports used (`BrowserRouter`, `MemoryRouter`, `Routes`, `Route`, `Navigate`, `useNavigate`, `useLocation`, `useParams`, `useSearchParams`) are unchanged in the unified package.
+- **Result**: `npm audit` now reports 0 vulnerabilities (down from 2 High entries for the same advisory, previously listed once per `react-router`/`react-router-dom` node). Removed the corresponding "known finding, not applicable" section from `docs/security.md` since the advisory no longer applies to any dependency in the tree.
+- **Verified**: `tsc -b` clean, `vite build` succeeds, and the existing Vitest suite passes at the same rate as before the migration (152/155 — the 3 pre-existing failures are unrelated `waitFor` timing issues in a settings-modal test, confirmed via `git stash` against the pre-migration tree).
+
 ## v3.3 — GitLab Provider Support & Security Hardening (2026-08-01)
 
 ### TODO (planned, not yet implemented) — Remove the source-bucket hot-swap feature
