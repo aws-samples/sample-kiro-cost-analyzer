@@ -178,7 +178,10 @@ def _invoke_agent(
     )
 
     result_text = response["response"].read().decode("utf-8")
-    logger.info("Agent raw response", response_text=result_text[:500])
+    # The response body is never logged: it is the agent's analysis result,
+    # which contains promptSummary/insights derived from the user's own
+    # Kiro prompts and Git activity. Only its length is logged.
+    logger.info("Agent raw response received", responseLength=len(result_text))
     result = json.loads(result_text)
     if isinstance(result, str):
         result = json.loads(result)

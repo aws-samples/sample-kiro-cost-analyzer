@@ -14,7 +14,7 @@ This sample applies defense-in-depth controls aligned with a STRIDE threat model
 | Token security | 1h ID/access token, 7-day refresh token, GlobalSignOut on logout |
 | Secrets | Git PATs (GitHub and GitLab) in SSM SecureString (KMS), never exposed in API responses |
 | Identity bridging | Cognito sub ↔ Kiro userId linked via custom attribute |
-| Encryption | S3 AES-256 at rest. All AWS-managed connections use TLS in transit. The agent-to-GitLab connection follows the scheme configured for the GitLab instance (`https` recommended; `http` supported for a self-hosted instance served over plain HTTP per Requirement 10.3). Certificate verification is enabled by default when `https` is used. **`GITLAB_SSL_VERIFY=false` disables it and MUST NOT be used in production** — see [TLS certificate trust](deploy.md#tls-certificate-trust). The agent-to-GitHub connection is always `https`, with certificate verification always enabled (no opt-out exists for GitHub). |
+| Encryption | S3 AES-256 at rest. All AWS-managed connections use TLS in transit. The agent-to-GitLab connection follows the scheme configured for the GitLab instance (`https` recommended; `http` supported for a self-hosted instance served over plain HTTP per Requirement 10.3). Certificate verification is always enabled when `https` is used, with no opt-out — see [TLS certificate trust](deploy.md#tls-certificate-trust). The agent-to-GitHub connection is always `https`, with certificate verification always enabled. |
 
 ## Threat model
 

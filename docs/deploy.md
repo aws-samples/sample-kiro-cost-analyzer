@@ -111,40 +111,21 @@ instance (for example, VPC peering, or a reachable public endpoint).
 
 ### TLS certificate trust
 
-The GitLab tool keeps certificate verification **enabled by default**. A
+The GitLab tool keeps certificate verification enabled unconditionally —
+there is no environment variable or configuration option to disable it. A
 GitLab instance served behind a private or internal CA, or a self-signed
 certificate, fails TLS verification, which surfaces as
-`GITLAB_REQUEST_FAILED`. The correct fix is to install a certificate trusted
-by the AgentCore runtime's default trust store on the GitLab instance — for
-example, a certificate from a publicly trusted CA, or one chained to a CA
-already present in the container's trust bundle.
+`GITLAB_REQUEST_FAILED`. The fix is to install a certificate trusted by the
+AgentCore runtime's default trust store on the GitLab instance — for
+example, a certificate from a publicly trusted CA (Let's Encrypt works well
+with the Omnibus GitLab package's built-in `letsencrypt['enable'] = true`
+support, provided the instance has a DNS name — Let's Encrypt does not
+issue certificates for bare IP addresses), or one chained to a CA already
+present in the container's trust bundle.
 
-**`GITLAB_SSL_VERIFY=false` — do not use in production.** As a documented,
-narrow exception (Requirement 10.3), setting the environment variable
-`GITLAB_SSL_VERIFY=false` (via `make deploy-agentcore GITLAB_SSL_VERIFY=false`,
-which passes it to `agentcore deploy --env`) disables certificate
-verification for GitLab API calls only. This is a deliberate escape hatch for
-sample/demo/lab environments where installing a trusted certificate is not
-practical, **not** a supported production configuration:
-
-- It disables protection against man-in-the-middle attacks on the
-  agent-to-GitLab connection, on which the `PRIVATE-TOKEN` credential
-  travels.
-- `gitlab_tool.py` logs a `logger.warning` on every request made with
-  verification disabled, so this is never a silent state in production
-  observability.
-- **MUST NOT be set in any production or customer-facing deployment.** If
-  your production GitLab instance has a self-signed certificate, replace it
-  with one issued by a trusted CA (public or internal) instead of disabling
-  verification.
-
-The Makefile default is `GITLAB_SSL_VERIFY ?= true` (verification enabled) —
-this is intentional and must not be changed at the repository level; override
-it per-invocation only, and only for a non-production target.
-
-Both of these are environment preconditions to satisfy before the GitLab
-integration works at all, not application bugs — which is why they sit here
-with the deployment steps rather than in the README.
+This is an environment precondition to satisfy before the GitLab
+integration works at all, not an application bug — which is why it sits
+here with the deployment steps rather than in the README.
 
 ## First deploy: `sam deploy --guided`
 

@@ -179,7 +179,7 @@ The GitLab integration uses a GitLab Personal Access Token, sent on the `PRIVATE
 | `read_api` | List commits and merge requests via the REST API v4 |
 | `read_repository` | Read commit history for the configured project |
 
-Personal Access Tokens only — GitLab OAuth apps are out of scope for this sample. The token is stored per repository in SSM Parameter Store (`SecureString`, path `/kiro-cost-analyzer/git-tokens/{repoId}`), the same layout used for GitHub tokens — provider-independent. Certificate verification is enabled by default for GitLab requests. `GITLAB_SSL_VERIFY=false` disables it as a documented, narrow exception for self-signed instances — **this MUST NOT be used in production**; see [TLS certificate trust](deploy.md#tls-certificate-trust). See [GitLab integration prerequisites](deploy.md#gitlab-integration-prerequisites) for the self-hosted network-reachability and TLS-trust preconditions.
+Personal Access Tokens only — GitLab OAuth apps are out of scope for this sample. The token is stored per repository in SSM Parameter Store (`SecureString`, path `/kiro-cost-analyzer/git-tokens/{repoId}`), the same layout used for GitHub tokens — provider-independent. Certificate verification is always enabled for GitLab requests, with no opt-out — see [TLS certificate trust](deploy.md#tls-certificate-trust). See [GitLab integration prerequisites](deploy.md#gitlab-integration-prerequisites) for the self-hosted network-reachability precondition.
 
 ---
 

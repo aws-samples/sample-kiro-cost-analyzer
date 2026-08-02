@@ -83,26 +83,6 @@ AGENTCORE_AGENT_NAME := GitCorrelationAgent
 # credential chain and can deploy into the wrong account.
 AGENTCORE_ENV := $(if $(AWS_PROFILE),AWS_PROFILE=$(AWS_PROFILE) ,)AWS_REGION=$(REGION) AWS_DEFAULT_REGION=$(REGION)
 
-# Opt-out for self-hosted GitLab instances with a self-signed certificate
-# (Requirement 10.3 of .kiro/specs/gitlab-provider-support/). Secure by
-# default: TLS certificate verification stays ENABLED unless the operator
-# explicitly overrides it, having confirmed their GitLab instance presents
-# a self-signed certificate they will not replace, e.g.:
-#   make deploy-agentcore AWS_PROFILE=kca GITLAB_SSL_VERIFY=false
-#
-# DO NOT SET GITLAB_SSL_VERIFY=false IN PRODUCTION. This disables protection
-# against man-in-the-middle attacks on the connection carrying the
-# PRIVATE-TOKEN credential. It exists only for sample/demo/lab environments
-# where installing a trusted certificate is not practical. The correct fix
-# in production is to replace the self-signed certificate with a
-# CA-issued one — see "TLS certificate trust" in docs/deploy.md.
-#
-# `agentcore deploy --env` persists this as an environmentVariable on the
-# AgentCore Runtime itself, so it survives independently of how the Lambda
-# side is deployed.
-GITLAB_SSL_VERIFY ?= true
-AGENTCORE_DEPLOY_ENV_FLAGS := $(if $(GITLAB_SSL_VERIFY),--env GITLAB_SSL_VERIFY=$(GITLAB_SSL_VERIFY),)
-
 ## Preflight for the AgentCore deploy: the agentcore CLI ships inside the
 ## project virtualenv, so check the venv FIRST (a missing venv is the usual
 ## reason the CLI "isn't found"), then the CLI itself, with actionable steps.
@@ -137,10 +117,7 @@ deploy-agentcore: check-agentcore-env
 	     -e 's|__STACK_NAME__|$(STACK_NAME)|g' \
 	     $(AGENTCORE_AGENT_DIR)/.bedrock_agentcore.yaml.template > $(AGENTCORE_AGENT_DIR)/.bedrock_agentcore.yaml
 	@echo "🤖 Deploying GitCorrelationAgent to Bedrock AgentCore (account $(ACCOUNT_ID), region $(REGION))..."
-	@if [ -n "$(GITLAB_SSL_VERIFY)" ]; then \
-		echo "   GITLAB_SSL_VERIFY=$(GITLAB_SSL_VERIFY) will be set on the runtime"; \
-	fi
-	cd $(AGENTCORE_AGENT_DIR) && $(AGENTCORE_ENV) agentcore deploy --auto-update-on-conflict $(AGENTCORE_DEPLOY_ENV_FLAGS)
+	cd $(AGENTCORE_AGENT_DIR) && $(AGENTCORE_ENV) agentcore deploy --auto-update-on-conflict
 	@echo "✅ Agent deployed to AgentCore!"
 	@echo "🔗 Resolving runtime ARN by name and syncing it into stack $(STACK_NAME)..."
 	@set -e; \

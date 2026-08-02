@@ -62,7 +62,13 @@ def fetch_repo_token(repo_id: str, ssm_client=None) -> str:
     client = ssm_client or boto3.client("ssm")
     parameter_name = f"{SSM_TOKEN_PATH_PREFIX}/{repo_id}"
 
-    logger.info("Fetching Git token from SSM: repo_id=%s parameter=%s", repo_id, parameter_name)
+    # This logs the SSM *parameter name* only (a non-secret path — see
+    # SSM_TOKEN_PATH_PREFIX's own noqa above). The decrypted token value
+    # from `response` below is never passed to any logger call in this
+    # module. Semgrep's credential-disclosure rule pattern-matches on the
+    # words "token"/"parameter" in the message string, not on what value
+    # is actually interpolated.
+    logger.info("Fetching Git token from SSM: repo_id=%s parameter=%s", repo_id, parameter_name)  # nosemgrep: python-logger-credential-disclosure
 
     try:
         response = client.get_parameter(Name=parameter_name, WithDecryption=True)

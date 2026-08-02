@@ -187,13 +187,15 @@ def _process_csv_file(
         csv_content = read_csv_content(bucket, key, s3_client=s3_client)
     except Exception as exc:
         if "AccessDenied" in type(exc).__name__ or "AccessDenied" in str(exc):
+            # errorMessage/response deliberately omitted: a boto3
+            # AccessDenied error can echo the assumed role ARN and other
+            # cross-account request metadata. Only the error's class name
+            # and the bucket/key already known to the caller are logged.
             logger.error(
                 "Acesso negado ao ler arquivo CSV. Verifique as permissões da Role_Origem.",
-                roleArn=getattr(exc, "response", {}).get("Error", {}).get("Code", ""),
                 bucket=bucket,
                 key=key,
                 errorType=type(exc).__name__,
-                errorMessage=str(exc),
             )
         raise
     format_type = metadata["format_type"]
@@ -209,13 +211,13 @@ def _process_prompt_file(
         gzipped_content = read_prompt_file(bucket, key, s3_client=s3_client)
     except Exception as exc:
         if "AccessDenied" in type(exc).__name__ or "AccessDenied" in str(exc):
+            # errorMessage/response deliberately omitted — see the matching
+            # comment in _process_csv_file above.
             logger.error(
                 "Acesso negado ao ler arquivo de prompt. Verifique as permissões da Role_Origem.",
-                roleArn=getattr(exc, "response", {}).get("Error", {}).get("Code", ""),
                 bucket=bucket,
                 key=key,
                 errorType=type(exc).__name__,
-                errorMessage=str(exc),
             )
         raise
     # Pass empty name_cache — names are resolved after processing

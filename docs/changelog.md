@@ -6,6 +6,13 @@
 
 ## v3.3 — GitLab Provider Support & Security Hardening (2026-08-01)
 
+### Security — Removed the `GITLAB_SSL_VERIFY` TLS bypass entirely
+
+- **Removed, not just defaulted-off.** The `GITLAB_SSL_VERIFY` opt-out introduced below (see "Fix — Self-hosted GitLab with a self-signed certificate could not be reached") and hardened in the Holmes remediation above is now removed from the codebase entirely — `gitlab_tool.py`'s `_ssl_verify_enabled()` function, the `verify=` kwarg on both `requests.get()` calls, and the `Makefile`'s `GITLAB_SSL_VERIFY` variable and `--env` passthrough are all gone. `requests` now always verifies certificates against the system trust store, with no environment variable or configuration path to disable it — matching the original design intent in `.kiro/specs/gitlab-provider-support/design.md` ("The tool does **not** expose a `verify=False` escape hatch").
+- **Why**: two independent Holmes CSR scans flagged this as High severity even after the safe-by-default fix, because sample code that *can* disable TLS verification — regardless of default value or warning text — teaches the wrong pattern to anyone who copies it. The actual fix for a self-signed GitLab instance is a trusted certificate, not a bypass.
+- **Unblocks this**: the self-hosted GitLab instance used during development now serves a Let's Encrypt certificate via the Omnibus package's built-in `letsencrypt['enable'] = true` support, reachable at a DNS name instead of a bare IP (Let's Encrypt does not issue certificates for IP addresses). `docs/deploy.md`'s "TLS certificate trust" section documents this path.
+- **Tests** — `tests/test_gitlab_tool.py`'s `TestGitlabSslVerifyEnvVar` class (4 cases covering the opt-out) is removed; `test_certificate_verification_enabled_by_default` is replaced with `test_certificate_verification_never_disabled`, which asserts `verify` is never even passed as a kwarg to `requests.get()`.
+
 ### Fix — Self-hosted GitLab with a self-signed certificate could not be reached
 
 - **Bug** — a GitLab correlation attempt against a self-hosted instance with a self-signed certificate failed every request with `SSLCertVerificationError: certificate verify failed: self-signed certificate`, surfacing as `GITLAB_REQUEST_FAILED`.

@@ -565,105 +565,18 @@ class TestGitlabToolFunction:
 
     @patch("agent.app.GitCorrelationAgent.tools.gitlab_tool.fetch_repo_token", return_value="fake-token")
     @patch("agent.app.GitCorrelationAgent.tools.gitlab_tool.requests.get")
-    def test_certificate_verification_enabled_by_default(self, mock_get, mock_fetch_token):
-        """Test that with GITLAB_SSL_VERIFY unset, both requests.get calls verify=True."""
+    def test_certificate_verification_never_disabled(self, mock_get, mock_fetch_token):
+        """Test that certificate verification cannot be disabled — there is no `verify=` kwarg at all."""
         mock_get.side_effect = [_make_response(200, []), _make_response(200, [])]
 
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("GITLAB_SSL_VERIFY", None)
-            tool_fn = build_gitlab_tool()
-            tool_fn(
-                repo_id=FAKE_REPO_ID,
-                base_url=FAKE_BASE_URL,
-                project_path=FAKE_PROJECT_PATH,
-                author=FAKE_AUTHOR,
-                since=FAKE_SINCE,
-            )
+        tool_fn = build_gitlab_tool()
+        tool_fn(
+            repo_id=FAKE_REPO_ID,
+            base_url=FAKE_BASE_URL,
+            project_path=FAKE_PROJECT_PATH,
+            author=FAKE_AUTHOR,
+            since=FAKE_SINCE,
+        )
 
         for _, kwargs in mock_get.call_args_list:
-            assert kwargs.get("verify") is True
-
-
-class TestGitlabSslVerifyEnvVar:
-    """Unit tests for the `GITLAB_SSL_VERIFY` opt-out (self-signed instances).
-
-    Requirement 10.3 of `.kiro/specs/gitlab-provider-support/` documents
-    that some self-hosted GitLab instances present a self-signed
-    certificate the user has explicitly chosen not to replace. Setting
-    `GITLAB_SSL_VERIFY=false` disables verification for GitLab API calls
-    only — the default (unset, or any value other than the literal
-    "false") keeps verification enabled.
-    """
-
-    @patch("agent.app.GitCorrelationAgent.tools.gitlab_tool.fetch_repo_token", return_value="fake-token")
-    @patch("agent.app.GitCorrelationAgent.tools.gitlab_tool.requests.get")
-    def test_ssl_verify_false_disables_verification_on_both_calls(self, mock_get, mock_fetch_token):
-        mock_get.side_effect = [_make_response(200, []), _make_response(200, [])]
-
-        with patch.dict(os.environ, {"GITLAB_SSL_VERIFY": "false"}):
-            tool_fn = build_gitlab_tool()
-            tool_fn(
-                repo_id=FAKE_REPO_ID,
-                base_url=FAKE_BASE_URL,
-                project_path=FAKE_PROJECT_PATH,
-                author=FAKE_AUTHOR,
-                since=FAKE_SINCE,
-            )
-
-        for _, kwargs in mock_get.call_args_list:
-            assert kwargs.get("verify") is False
-
-    @patch("agent.app.GitCorrelationAgent.tools.gitlab_tool.fetch_repo_token", return_value="fake-token")
-    @patch("agent.app.GitCorrelationAgent.tools.gitlab_tool.requests.get")
-    def test_ssl_verify_false_is_case_insensitive(self, mock_get, mock_fetch_token):
-        mock_get.side_effect = [_make_response(200, []), _make_response(200, [])]
-
-        with patch.dict(os.environ, {"GITLAB_SSL_VERIFY": "FALSE"}):
-            tool_fn = build_gitlab_tool()
-            tool_fn(
-                repo_id=FAKE_REPO_ID,
-                base_url=FAKE_BASE_URL,
-                project_path=FAKE_PROJECT_PATH,
-                author=FAKE_AUTHOR,
-                since=FAKE_SINCE,
-            )
-
-        for _, kwargs in mock_get.call_args_list:
-            assert kwargs.get("verify") is False
-
-    @patch("agent.app.GitCorrelationAgent.tools.gitlab_tool.fetch_repo_token", return_value="fake-token")
-    @patch("agent.app.GitCorrelationAgent.tools.gitlab_tool.requests.get")
-    def test_unrecognized_value_keeps_verification_enabled(self, mock_get, mock_fetch_token):
-        """A typo or unexpected value (not the literal "false") must fail safe to verify=True."""
-        mock_get.side_effect = [_make_response(200, []), _make_response(200, [])]
-
-        with patch.dict(os.environ, {"GITLAB_SSL_VERIFY": "no"}):
-            tool_fn = build_gitlab_tool()
-            tool_fn(
-                repo_id=FAKE_REPO_ID,
-                base_url=FAKE_BASE_URL,
-                project_path=FAKE_PROJECT_PATH,
-                author=FAKE_AUTHOR,
-                since=FAKE_SINCE,
-            )
-
-        for _, kwargs in mock_get.call_args_list:
-            assert kwargs.get("verify") is True
-
-    @patch("agent.app.GitCorrelationAgent.tools.gitlab_tool.fetch_repo_token", return_value="fake-token")
-    @patch("agent.app.GitCorrelationAgent.tools.gitlab_tool.requests.get")
-    def test_ssl_verify_true_explicit_keeps_verification_enabled(self, mock_get, mock_fetch_token):
-        mock_get.side_effect = [_make_response(200, []), _make_response(200, [])]
-
-        with patch.dict(os.environ, {"GITLAB_SSL_VERIFY": "true"}):
-            tool_fn = build_gitlab_tool()
-            tool_fn(
-                repo_id=FAKE_REPO_ID,
-                base_url=FAKE_BASE_URL,
-                project_path=FAKE_PROJECT_PATH,
-                author=FAKE_AUTHOR,
-                since=FAKE_SINCE,
-            )
-
-        for _, kwargs in mock_get.call_args_list:
-            assert kwargs.get("verify") is True
+            assert "verify" not in kwargs

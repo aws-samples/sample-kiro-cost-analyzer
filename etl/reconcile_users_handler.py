@@ -178,12 +178,16 @@ def reconcile_users_handler(event, context):  # noqa: ARG001 - Lambda contract
             counters[decision] += 1
         except Exception as exc:
             counters["update_failed"] += 1
+            # errorMessage deliberately omitted, consistent with the same
+            # pattern applied elsewhere in this change set: a DynamoDB
+            # ClientError message can echo request details beyond what's
+            # needed here. userId/decision/errorType are sufficient to
+            # investigate which user/transition failed and why.
             logger.error(
                 "UpdateItem failed for user — continuing",
                 userId=user_id,
                 decision=decision,
                 errorType=type(exc).__name__,
-                errorMessage=str(exc),
             )
 
     summary = {

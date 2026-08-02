@@ -23,34 +23,15 @@ Author filtering is deliberately belt-and-braces:
   tool also re-checks `author.username` client-side, mirroring the
   defensive pattern `github_tool.py` uses with `pr["user"]["login"]`.
 
-Certificate verification is enabled by default. Some self-hosted GitLab
-instances (Requirement 10.3 of `.kiro/specs/gitlab-provider-support/`)
-present a self-signed certificate that the user has explicitly chosen not
-to replace with a CA-issued one. For that documented case only, setting
-the environment variable `GITLAB_SSL_VERIFY=false` disables verification
-for GitLab API calls specifically — it has no effect on the GitHub tool or
-on any other outbound connection this agent makes, and it does not affect
-where the `PRIVATE-TOKEN` header is sent: the token still only ever goes
-to `base_url`, whichever host that resolves to. The default remains
-verification-enabled so a GitLab.com or properly-certificated self-hosted
-target is unaffected.
-
-*** DO NOT SET `GITLAB_SSL_VERIFY=false` IN PRODUCTION. ***
-Disabling certificate verification removes protection against
-man-in-the-middle attacks on the exact connection that carries the
-`PRIVATE-TOKEN` credential. This opt-out exists only for sample/demo/lab
-environments where installing a properly trusted certificate on a
-self-hosted GitLab instance is genuinely not practical. The correct fix
-for a self-signed certificate in any production or customer-facing
-deployment is to replace it with one issued by a trusted CA (public or
-internal) — not to disable verification. See "TLS certificate trust" in
-`docs/deploy.md`.
+Certificate verification is always enabled and cannot be disabled. A
+GitLab instance served over a self-signed certificate must be given a
+certificate issued by a trusted CA (public or internal) — see "TLS
+certificate trust" in `docs/deploy.md`.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from urllib.parse import quote
 
 import requests
@@ -67,20 +48,6 @@ MAX_COMMITS = 100
 MAX_MRS = 50
 REQUEST_TIMEOUT_SECONDS = 30
 API_PATH = "/api/v4"
-
-
-def _ssl_verify_enabled() -> bool:
-    """Read the `GITLAB_SSL_VERIFY` env var, defaulting to verification enabled.
-
-    Only the literal value `"false"` (case-insensitive) disables
-    verification. Any other value, including unset, empty, or a typo,
-    keeps verification enabled — the safe default.
-
-    Returns:
-        `False` only if `GITLAB_SSL_VERIFY` is set to `"false"`
-        (case-insensitive); `True` otherwise.
-    """
-    return os.environ.get("GITLAB_SSL_VERIFY", "true").strip().lower() != "false"
 
 
 def build_gitlab_tool(ssm_client=None):
@@ -133,23 +100,6 @@ def build_gitlab_tool(ssm_client=None):
 
         headers = {"PRIVATE-TOKEN": token}
         encoded_project_path = quote(project_path, safe="")
-        ssl_verify = _ssl_verify_enabled()
-        if not ssl_verify:
-            logger.warning(
-                "GitLab SSL certificate verification is DISABLED for this request "
-                "(GITLAB_SSL_VERIFY=false): repo_id=%s base_url=%s. "
-                "THIS MUST NOT BE USED IN PRODUCTION — it removes protection "
-                "against man-in-the-middle attacks on the connection carrying "
-                "the PRIVATE-TOKEN credential. Replace the self-signed "
-                "certificate with a trusted CA-issued one instead.",
-                repo_id, base_url,
-            )
-            # Suppress urllib3's per-request InsecureRequestWarning — the
-            # warning above already logs this clearly, once per request,
-            # via the structured logger.
-            import urllib3
-
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
         # Fetch commits
         commits_url = f"{base_url}{API_PATH}/projects/{encoded_project_path}/repository/commits"
@@ -169,7 +119,6 @@ def build_gitlab_tool(ssm_client=None):
                 headers=headers,
                 params=commits_params,
                 timeout=REQUEST_TIMEOUT_SECONDS,
-                verify=ssl_verify,
             )
         except requests.RequestException as exc:
             logger.error(
@@ -239,7 +188,6 @@ def build_gitlab_tool(ssm_client=None):
                 headers=headers,
                 params=mrs_params,
                 timeout=REQUEST_TIMEOUT_SECONDS,
-                verify=ssl_verify,
             )
         except requests.RequestException as exc:
             logger.error(
