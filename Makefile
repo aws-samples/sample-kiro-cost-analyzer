@@ -93,7 +93,7 @@ check-agentcore-env:
 		echo ""; \
 		echo "     python3 -m venv .venv"; \
 		echo "     source .venv/bin/activate"; \
-		echo "     pip install bedrock-agentcore-starter-toolkit==0.3.6"; \
+		echo "     pip install bedrock-agentcore-starter-toolkit==0.3.11"; \
 		echo ""; \
 		echo "   then re-run 'make deploy-agentcore'."; \
 		exit 1; \
@@ -102,7 +102,7 @@ check-agentcore-env:
 		echo "❌ The 'agentcore' CLI is not on PATH, even though a venv is active."; \
 		echo "   Install it into the active venv:"; \
 		echo ""; \
-		echo "     pip install bedrock-agentcore-starter-toolkit==0.3.6"; \
+		echo "     pip install bedrock-agentcore-starter-toolkit==0.3.11"; \
 		echo ""; \
 		exit 1; \
 	}
