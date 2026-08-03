@@ -1,6 +1,6 @@
-<mxfile host="app.diagrams.net">
+<mxfile host="Electron">
   <diagram name="Page-1" id="-MjVMpq2enGU-C9R9rnd">
-    <mxGraphModel dx="1746" dy="1518" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+    <mxGraphModel dx="2020" dy="1134" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -38,7 +38,7 @@
           <mxGeometry height="80" width="80" x="960" y="80" as="geometry" />
         </mxCell>
         <mxCell id="agent_grp" parent="1" style="swimlane;startSize=30;fillColor=#e8f5e9;strokeColor=#82b366;rounded=1;html=1;fontSize=14;fontStyle=1;" value="Git-Kiro Correlation Agent" vertex="1">
-          <mxGeometry height="490" width="580" x="1080" y="160" as="geometry" />
+          <mxGeometry height="554" width="580" x="1080" y="160" as="geometry" />
         </mxCell>
         <mxCell id="agentcore" parent="agent_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sagemaker;fillColor=#01A88D;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Amazon Bedrock&lt;br&gt;AgentCore" vertex="1">
           <mxGeometry height="80" width="80" x="40" y="120" as="geometry" />
@@ -46,20 +46,17 @@
         <mxCell id="claude_sonnet" parent="agent_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sagemaker;fillColor=#01A88D;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Claude Sonnet 4.6&lt;br&gt;(Amazon Bedrock)" vertex="1">
           <mxGeometry height="80" width="80" x="250" y="50" as="geometry" />
         </mxCell>
-        <mxCell id="github_tool" parent="agent_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.api_gateway;fillColor=#E7157B;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="GitHub Tool&lt;br&gt;(via API Gateway)" vertex="1">
+        <mxCell id="github_tool" parent="agent_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.api_gateway;fillColor=#E7157B;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Git Tool&lt;br&gt;(via API Gateway)" vertex="1">
           <mxGeometry height="80" width="80" x="250" y="190" as="geometry" />
-        </mxCell>
-        <mxCell id="gitlab_tool" parent="agent_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.api_gateway;fillColor=#E7157B;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="GitLab Tool&lt;br&gt;(direct HTTPS)" vertex="1">
-          <mxGeometry height="80" width="80" x="250" y="280" as="geometry" />
         </mxCell>
         <mxCell id="kiro_data_tool" parent="agent_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;fillColor=#ED7100;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="Kiro Data Tool&lt;br&gt;(AWS Lambda)" vertex="1">
           <mxGeometry height="80" width="80" x="250" y="390" as="geometry" />
         </mxCell>
         <mxCell id="github_api" parent="agent_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.client;fillColor=#232F3E;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="GitHub API" vertex="1">
-          <mxGeometry height="80" width="80" x="460" y="190" as="geometry" />
+          <mxGeometry height="80" width="80" x="460" y="87" as="geometry" />
         </mxCell>
         <mxCell id="gitlab_api" parent="agent_grp" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.client;fillColor=#232F3E;strokeColor=#ffffff;html=1;fontSize=11;verticalLabelPosition=bottom;verticalAlign=top;" value="GitLab Instance&lt;br&gt;(REST API v4)" vertex="1">
-          <mxGeometry height="80" width="80" x="460" y="280" as="geometry" />
+          <mxGeometry height="80" width="80" x="460" y="281" as="geometry" />
         </mxCell>
         <mxCell id="e11" edge="1" parent="agent_grp" source="agentcore" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="claude_sonnet">
           <mxGeometry relative="1" as="geometry" />
@@ -67,8 +64,10 @@
         <mxCell id="e12" edge="1" parent="agent_grp" source="agentcore" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="github_tool">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e13" edge="1" parent="agent_grp" source="agentcore" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="gitlab_tool">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="e13" edge="1" parent="agent_grp" source="agentcore" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="290" y="280" as="targetPoint" />
+          </mxGeometry>
         </mxCell>
         <mxCell id="e15b" edge="1" parent="agent_grp" source="agentcore" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="kiro_data_tool">
           <mxGeometry relative="1" as="geometry" />
@@ -76,8 +75,10 @@
         <mxCell id="e14" edge="1" parent="agent_grp" source="github_tool" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="github_api">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e14b" edge="1" parent="agent_grp" source="gitlab_tool" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="gitlab_api">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="e14b" edge="1" parent="agent_grp" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;html=1;" target="gitlab_api">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="330" y="231" as="sourcePoint" />
+          </mxGeometry>
         </mxCell>
         <mxCell id="etl_grp" parent="1" style="swimlane;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;rounded=1;html=1;fontSize=14;fontStyle=1;" value="ETL Pipeline" vertex="1">
           <mxGeometry height="440" width="1300" x="180" y="720" as="geometry" />
