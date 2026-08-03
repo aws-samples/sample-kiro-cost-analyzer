@@ -352,24 +352,6 @@ def _route(http_method: str, path: str, query_params: dict, body: dict, claims: 
 
     # --- Admin-only endpoints ---
 
-    if http_method == "PUT" and path == "/api/config/bucket":
-        if not _is_admin(claims):
-            return _build_response(403, {
-                "error": "Forbidden",
-                "message": "Access restricted to administrators",
-            })
-        result = config_handler.handle_put_config_bucket(body)
-        return _build_response(200, result)
-
-    if http_method == "PUT" and path == "/api/config/prompts-prefix":
-        if not _is_admin(claims):
-            return _build_response(403, {
-                "error": "Forbidden",
-                "message": "Access restricted to administrators",
-            })
-        result = config_handler.handle_put_config_prompts_prefix(body)
-        return _build_response(200, result)
-
     if http_method == "PUT" and path == "/api/config/identity-store-id":
         if not _is_admin(claims):
             return _build_response(403, {

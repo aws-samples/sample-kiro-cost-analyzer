@@ -6,11 +6,13 @@ import re
 from unittest.mock import MagicMock, patch
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
+from backend.handlers import config_handler
 from backend.handlers.config_handler import (
     _humanize_schedule,
     handle_get_config,
-    handle_put_config_bucket,
     handle_put_config_identity_store_role_arn,
     handle_put_config_prompt_history_enabled,
 )
@@ -90,6 +92,74 @@ class TestHandleGetConfig:
 
         assert result["bucketName"] == "bucket-x"
         assert result["etlStatus"] == {"raw": "not-valid-json"}
+
+    # Feature: s3-source-config-readonly, Property 2: GET /api/config display
+    # fields are total and empty-parameter-tolerant
+    #
+    # For each of bucketName/sourcePrefix/promptsPrefix, the underlying SSM
+    # parameter independently is: present with an arbitrary string, present
+    # with an empty string, or absent (get_parameter raises). Regardless of
+    # combination, handle_get_config must always return all three fields as
+    # `str`, equal to the parameter's value when present-and-non-empty, and
+    # equal to "" when absent or empty (Requirements 1.1, 1.6, 2.1, 2.2, 6.1,
+    # 6.3).
+    @patch.dict(os.environ, {
+        "SSM_BUCKET_NAME": "/kiro-cost-analyzer/bucket-name",
+        "SSM_SOURCE_PREFIX": "/kiro-cost-analyzer/source-prefix",
+        "SSM_PROMPTS_PREFIX": "/kiro-cost-analyzer/prompts-prefix",
+    }, clear=False)
+    @given(
+        bucket_state=st.one_of(
+            st.text(max_size=100).map(lambda s: ("value", s)),
+            st.just(("empty", "")),
+            st.just(("raise", None)),
+        ),
+        source_prefix_state=st.one_of(
+            st.text(max_size=100).map(lambda s: ("value", s)),
+            st.just(("empty", "")),
+            st.just(("raise", None)),
+        ),
+        prompts_prefix_state=st.one_of(
+            st.text(max_size=100).map(lambda s: ("value", s)),
+            st.just(("empty", "")),
+            st.just(("raise", None)),
+        ),
+    )
+    @settings(max_examples=100)
+    def test_display_fields_are_total_and_empty_parameter_tolerant(
+        self, bucket_state, source_prefix_state, prompts_prefix_state
+    ):
+        param_names = {
+            "/kiro-cost-analyzer/bucket-name": bucket_state,
+            "/kiro-cost-analyzer/source-prefix": source_prefix_state,
+            "/kiro-cost-analyzer/prompts-prefix": prompts_prefix_state,
+        }
+
+        def get_parameter(Name: str):
+            kind, value = param_names.get(Name, ("empty", ""))
+            if kind == "raise":
+                raise Exception("ParameterNotFound")
+            return {"Parameter": {"Value": value}}
+
+        ssm = MagicMock()
+        ssm.get_parameter.side_effect = get_parameter
+
+        result = handle_get_config(ssm_client=ssm)
+
+        expected = {
+            "bucketName": bucket_state,
+            "sourcePrefix": source_prefix_state,
+            "promptsPrefix": prompts_prefix_state,
+        }
+
+        for field, (kind, value) in expected.items():
+            assert field in result
+            assert isinstance(result[field], str)
+            if kind == "value":
+                assert result[field] == value
+            else:
+                # "empty" and "raise" are observably identical: both yield "".
+                assert result[field] == ""
 
 
 class TestHandleGetConfigIdentityStoreRoleArn:
@@ -391,110 +461,6 @@ class TestHandlePutConfigPromptHistoryEnabled:
             assert "Value" not in entry
 
 
-class TestHandlePutConfigBucket:
-    @patch.dict(os.environ, {
-        "SSM_BUCKET_NAME": "/kiro-cost-analyzer/bucket-name",
-        "SSM_SOURCE_PREFIX": "/kiro-cost-analyzer/source-prefix",
-    })
-    def test_valid_bucket_saves_config(self):
-        ssm = MagicMock()
-        s3 = MagicMock()
-        s3.head_bucket.return_value = {}
-        s3.exceptions.ClientError = type("ClientError", (Exception,), {})
-
-        result = handle_put_config_bucket(
-            {"bucketName": "my-bucket", "sourcePrefix": "prefix/"},
-            ssm_client=ssm,
-            s3_client=s3,
-        )
-
-        assert result["status"] == "valid"
-        assert result["bucketName"] == "my-bucket"
-        assert result["sourcePrefix"] == "prefix/"
-        assert ssm.put_parameter.call_count == 2
-
-    def test_empty_bucket_name_returns_error(self):
-        result = handle_put_config_bucket(
-            {"bucketName": "", "sourcePrefix": "prefix/"}
-        )
-
-        assert result["status"] == "error"
-        assert "required" in result["message"]
-
-    def test_missing_bucket_name_returns_error(self):
-        result = handle_put_config_bucket({"sourcePrefix": "prefix/"})
-
-        assert result["status"] == "error"
-        assert "required" in result["message"]
-
-    @patch.dict(os.environ, {
-        "SSM_BUCKET_NAME": "/kiro-cost-analyzer/bucket-name",
-        "SSM_SOURCE_PREFIX": "/kiro-cost-analyzer/source-prefix",
-    })
-    def test_inaccessible_bucket_returns_error(self):
-        ssm = MagicMock()
-        s3 = MagicMock()
-
-        client_error = type("ClientError", (Exception,), {})
-        s3.exceptions.ClientError = client_error
-        error = client_error()
-        error.response = {"Error": {"Code": "404"}}
-        s3.head_bucket.side_effect = error
-
-        result = handle_put_config_bucket(
-            {"bucketName": "nonexistent-bucket", "sourcePrefix": "prefix/"},
-            ssm_client=ssm,
-            s3_client=s3,
-        )
-
-        assert result["status"] == "error"
-        assert "does not exist" in result["message"]
-        ssm.put_parameter.assert_not_called()
-
-    @patch.dict(os.environ, {
-        "SSM_BUCKET_NAME": "/kiro-cost-analyzer/bucket-name",
-        "SSM_SOURCE_PREFIX": "/kiro-cost-analyzer/source-prefix",
-    })
-    def test_access_denied_bucket_returns_error(self):
-        ssm = MagicMock()
-        s3 = MagicMock()
-
-        client_error = type("ClientError", (Exception,), {})
-        s3.exceptions.ClientError = client_error
-        error = client_error()
-        error.response = {"Error": {"Code": "403"}}
-        s3.head_bucket.side_effect = error
-
-        result = handle_put_config_bucket(
-            {"bucketName": "forbidden-bucket", "sourcePrefix": "prefix/"},
-            ssm_client=ssm,
-            s3_client=s3,
-        )
-
-        assert result["status"] == "error"
-        assert "Access denied" in result["message"]
-        ssm.put_parameter.assert_not_called()
-
-    @patch.dict(os.environ, {
-        "SSM_BUCKET_NAME": "/kiro-cost-analyzer/bucket-name",
-        "SSM_SOURCE_PREFIX": "/kiro-cost-analyzer/source-prefix",
-    })
-    def test_generic_exception_returns_error(self):
-        ssm = MagicMock()
-        s3 = MagicMock()
-        s3.exceptions.ClientError = type("ClientError", (Exception,), {})
-        s3.head_bucket.side_effect = RuntimeError("network timeout")
-
-        result = handle_put_config_bucket(
-            {"bucketName": "some-bucket", "sourcePrefix": "prefix/"},
-            ssm_client=ssm,
-            s3_client=s3,
-        )
-
-        assert result["status"] == "error"
-        assert "network timeout" in result["message"]
-
-
 class TestHandlePutConfigIdentityStoreRoleArn:
     """Tests for handle_put_config_identity_store_role_arn.
 
@@ -792,3 +758,24 @@ class TestHumanizeSchedule:
 
     def test_empty_expression_returns_empty(self):
         assert _humanize_schedule("") == ""
+
+
+class TestRemovedWritePathFunctionsAbsent:
+    """Module-shape smoke test for the removed bucket/prompts-prefix write path.
+
+    Validates Requirements 3.2, 4.2, 6.2 — the handler functions for the
+    removed ``PUT /api/config/bucket`` and ``PUT /api/config/prompts-prefix``
+    routes, and their now-unused S3 client helper, no longer exist on the
+    module.
+    """
+
+    def test_handle_put_config_bucket_does_not_exist(self):
+        assert hasattr(config_handler, "handle_put_config_bucket") is False
+
+    def test_handle_put_config_prompts_prefix_does_not_exist(self):
+        assert hasattr(config_handler, "handle_put_config_prompts_prefix") is False
+
+    def test_get_s3_client_helper_does_not_exist(self):
+        """``_get_s3_client`` was only used by ``handle_put_config_bucket`` and
+        was removed alongside it (design.md, Component 3)."""
+        assert hasattr(config_handler, "_get_s3_client") is False

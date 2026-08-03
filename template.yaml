@@ -9,7 +9,6 @@ Parameters:
   SourcePrefix:
     Type: String
     Description: "Base prefix up to KiroLogs/ (e.g., activities/AWSLogs/123456789012/KiroLogs/)"
-    Default: ""
   AdminEmail:
     Type: String
     Description: Initial administrator email address
@@ -19,7 +18,6 @@ Parameters:
     Description: ETL schedule expression
   PromptsPrefix:
     Type: String
-    Default: ""
     Description: "Base prefix for prompt logs in the source bucket (e.g., prompts/AWSLogs/123456789012/KiroLogs/)"
   IdentityStoreId:
     Type: String
@@ -1691,12 +1689,6 @@ Resources:
             RestApiId: !Ref ApiGateway
             Path: /api/config
             Method: GET
-        ConfigBucketPut:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /api/config/bucket
-            Method: PUT
         EtlTriggerPost:
           Type: Api
           Properties:
@@ -1745,12 +1737,6 @@ Resources:
             RestApiId: !Ref ApiGateway
             Path: /api/usage/{userId}/details
             Method: GET
-        ConfigPromptsPrefixPut:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /api/config/prompts-prefix
-            Method: PUT
         ConfigIdentityStoreIdPut:
           Type: Api
           Properties:
@@ -1889,42 +1875,6 @@ Resources:
               Resource:
                 - !Sub "arn:aws:s3:::${DataBucket}"
                 - !Sub "arn:aws:s3:::${DataBucket}/*"
-            - Sid: ValidateSourceBucket
-              Effect: Allow
-              Action:
-                - s3:ListBucket
-              # holmes:suppress Encryption and Data Protection — Wildcard resource
-              # scope on s3:ListBucket allows listing ANY S3 bucket in any account.
-              #
-              # Accepted trade-off, not a fixable gap: `PUT /api/config/bucket`
-              # (config_handler.handle_put_config_bucket) calls
-              # `s3.head_bucket(Bucket=bucket_name)` to validate admin-supplied
-              # access to a source bucket BEFORE persisting it to SSM. HeadBucket
-              # has no dedicated IAM action — the S3 API requires s3:ListBucket
-              # for it. The bucket name is arbitrary admin input at request time
-              # (see .kiro/specs/cross-account-s3-access/), potentially in another
-              # AWS account, so it cannot be pinned to a naming convention or a
-              # deploy-time resource list without breaking that feature's stated
-              # purpose (validating connectivity to any configured source bucket,
-              # same-account or cross-account). Scoping this down would require
-              # either a fixed allowlist of expected bucket names (defeats the
-              # cross-account use case) or replacing the validation with a
-              # try/handle-AccessDenied pattern that gives up the pre-save
-              # feedback this endpoint exists to provide. Access is still
-              # read-only (list only, no object read/write) and gated behind the
-              # Admins group check in `backend/handler.py`.
-              #
-              # TODO: remove the "reconfigure source bucket" UI/API entirely
-              # (Settings page bucket field, PUT /api/config/bucket,
-              # handle_put_config_bucket) and this ValidateSourceBucket
-              # statement along with it. Changing the source bucket after
-              # deploy is expected to be rare in practice; a redeploy with a
-              # new SourceBucketName parameter is an acceptable path for the
-              # few who need it, and removing the hot-swap feature removes
-              # this wildcard grant rather than just documenting it as
-              # accepted. Decided 2026-08-01 — see docs/security.md and
-              # docs/changelog.md for the same note.
-              Resource: "arn:aws:s3:::*"
             - Sid: DynamoDBReadAccess
               Effect: Allow
               Action:
@@ -2003,7 +1953,7 @@ Resources:
               Action:
                 - kms:Encrypt
                 - kms:Decrypt
-              Resource: !Sub "arn:aws:kms:*:${AWS::AccountId}:key/*"
+              Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
               Condition:
                 StringEquals:
                   kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
@@ -2090,7 +2040,7 @@ Resources:
               Effect: Allow
               Action:
                 - kms:Decrypt
-              Resource: !Sub "arn:aws:kms:*:${AWS::AccountId}:key/*"
+              Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
               Condition:
                 StringEquals:
                   kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
@@ -2186,7 +2136,7 @@ Resources:
             Effect: Allow
             Action:
               - kms:Decrypt
-            Resource: !Sub "arn:aws:kms:*:${AWS::AccountId}:key/*"
+            Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
             Condition:
               StringEquals:
                 kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"

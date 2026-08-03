@@ -6,6 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from backend.handler import (
     ADMIN_GROUP,
@@ -182,22 +184,6 @@ class TestGetConfig:
         resp = lambda_handler(event, None)
         assert resp["statusCode"] == 200
         mock_mod.handle_get_config.assert_called_once()
-
-
-class TestPutConfigBucket:
-    @patch("backend.handler.config_handler")
-    def test_admin_can_update_bucket(self, mock_mod):
-        mock_mod.handle_put_config_bucket.return_value = {"status": "valid"}
-        event = _make_event("PUT", "/api/config/bucket", body={"bucketName": "b"}, groups="Admins")
-        resp = lambda_handler(event, None)
-        assert resp["statusCode"] == 200
-        mock_mod.handle_put_config_bucket.assert_called_once_with({"bucketName": "b"})
-
-    def test_non_admin_gets_403(self):
-        event = _make_event("PUT", "/api/config/bucket", body={"bucketName": "b"}, groups="Viewers")
-        resp = lambda_handler(event, None)
-        assert resp["statusCode"] == 403
-        assert "Forbidden" in json.loads(resp["body"])["error"]
 
 
 class TestPutConfigIdentityStoreRoleArn:
@@ -620,3 +606,59 @@ class TestPromptsRoute:
         mock_mod.handle_list_prompts.assert_called_once_with(
             {"userId": "cognito-sub-123"}
         )
+
+
+# ---------------------------------------------------------------------------
+# Property-based tests
+# ---------------------------------------------------------------------------
+
+# Strategy: arbitrary JSON-serializable values (bounded depth to keep
+# generation fast), used to build request bodies for the removed routes.
+_json_scalars = st.one_of(
+    st.none(),
+    st.booleans(),
+    st.integers(min_value=-1_000_000, max_value=1_000_000),
+    st.floats(allow_nan=False, allow_infinity=False),
+    st.text(max_size=50),
+)
+
+_json_values = st.recursive(
+    _json_scalars,
+    lambda children: st.one_of(
+        st.lists(children, max_size=5),
+        st.dictionaries(st.text(max_size=20), children, max_size=5),
+    ),
+    max_leaves=10,
+)
+
+_json_bodies = st.one_of(
+    st.none(),
+    st.dictionaries(st.text(max_size=20), _json_values, max_size=5),
+)
+
+
+# Feature: s3-source-config-readonly, Property 1: Removed write routes always 404 regardless of request content
+class TestRemovedWriteRoutesAlwaysNotFound:
+    """Property 1: Removed write routes always 404 regardless of request content.
+
+    For any HTTP request body sent as ``PUT /api/config/bucket`` or
+    ``PUT /api/config/prompts-prefix``, the response is the generic 404
+    ``NotFound`` fallback, regardless of the caller's admin status. This
+    proves there is no reachable conditional branch left in the dispatch
+    chain for either removed route.
+
+    **Validates: Requirements 3.1, 3.4, 4.1, 4.4**
+    """
+
+    @settings(max_examples=100)
+    @given(
+        path=st.sampled_from(["/api/config/bucket", "/api/config/prompts-prefix"]),
+        body=_json_bodies,
+        groups=st.sampled_from(["Admins", "Viewers", ""]),
+    )
+    def test_removed_routes_always_404(self, path, body, groups):
+        event = _make_event("PUT", path, body=body, groups=groups)
+        resp = lambda_handler(event, None)
+        assert resp["statusCode"] == 404
+        response_body = json.loads(resp["body"])
+        assert response_body["error"] == "NotFound"

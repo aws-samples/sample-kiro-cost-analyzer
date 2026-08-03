@@ -1,4 +1,4 @@
-"""Handlers for GET /api/config, PUT /api/config/bucket, PUT /api/config/source-bucket-role-arn, and GET /api/config/schedule."""
+"""Handlers for GET /api/config, PUT /api/config/source-bucket-role-arn, and GET /api/config/schedule."""
 
 import json
 import logging
@@ -21,11 +21,6 @@ _ARN_PATTERN = re.compile(r"^arn:aws:iam::\d{12}:role/.+$")
 def _get_ssm_client(ssm_client=None):
     """Return the provided client or create a new SSM client."""
     return ssm_client or boto3.client("ssm")
-
-
-def _get_s3_client(s3_client=None):
-    """Return the provided client or create a new S3 client."""
-    return s3_client or boto3.client("s3")
 
 
 def _get_parameter(ssm, name: str) -> str:
@@ -87,97 +82,6 @@ def handle_get_config(ssm_client=None) -> dict:
         "sourceBucketRoleArn": source_bucket_role_arn,
         "identityStoreRoleArn": identity_store_role_arn,
         "promptHistoryEnabled": prompt_history_enabled,
-    }
-
-
-def handle_put_config_bucket(body: dict, ssm_client=None, s3_client=None) -> dict:
-    """Handle PUT /api/config/bucket — validate and save bucket configuration.
-
-    Validates bucket access via HeadBucket before persisting to Parameter Store.
-
-    Args:
-        body: Request body with ``bucketName`` and ``sourcePrefix``.
-        ssm_client: Optional pre-configured SSM client for testing.
-        s3_client: Optional pre-configured S3 client for testing.
-
-    Returns:
-        Dict with bucketName, sourcePrefix, status, and message.
-    """
-    bucket_name = body.get("bucketName", "").strip()
-    source_prefix = body.get("sourcePrefix", "").strip()
-
-    if not bucket_name:
-        return {
-            "bucketName": bucket_name,
-            "sourcePrefix": source_prefix,
-            "status": "error",
-            "message": "bucketName is required",
-        }
-
-    s3 = _get_s3_client(s3_client)
-
-    # Validate bucket access
-    try:
-        s3.head_bucket(Bucket=bucket_name)
-    except s3.exceptions.ClientError as exc:
-        error_code = exc.response.get("Error", {}).get("Code", "Unknown")
-        if error_code in ("403", "AccessDenied"):
-            msg = f"Access denied to bucket '{bucket_name}'. Check IAM permissions."
-        elif error_code in ("404", "NoSuchBucket"):
-            msg = f"Bucket '{bucket_name}' does not exist."
-        else:
-            msg = f"Unable to access bucket '{bucket_name}': {error_code}"
-        return {
-            "bucketName": bucket_name,
-            "sourcePrefix": source_prefix,
-            "status": "error",
-            "message": msg,
-        }
-    except Exception as exc:
-        return {
-            "bucketName": bucket_name,
-            "sourcePrefix": source_prefix,
-            "status": "error",
-            "message": f"Unable to access bucket '{bucket_name}': {exc}",
-        }
-
-    # Save to Parameter Store
-    ssm = _get_ssm_client(ssm_client)
-    ssm_bucket = os.environ.get("SSM_BUCKET_NAME", "/kiro-cost-analyzer/bucket-name")
-    ssm_prefix = os.environ.get("SSM_SOURCE_PREFIX", "/kiro-cost-analyzer/source-prefix")
-
-    ssm.put_parameter(Name=ssm_bucket, Value=bucket_name, Type="String", Overwrite=True)
-    ssm.put_parameter(Name=ssm_prefix, Value=source_prefix, Type="String", Overwrite=True)
-
-    return {
-        "bucketName": bucket_name,
-        "sourcePrefix": source_prefix,
-        "status": "valid",
-        "message": "Bucket is accessible and configuration saved successfully",
-    }
-
-
-def handle_put_config_prompts_prefix(body: dict, ssm_client=None) -> dict:
-    """Handle PUT /api/config/prompts-prefix — save prompts prefix to Parameter Store.
-
-    Args:
-        body: Request body with ``promptsPrefix``.
-        ssm_client: Optional pre-configured SSM client for testing.
-
-    Returns:
-        Dict with promptsPrefix, status, and message.
-    """
-    prompts_prefix = body.get("promptsPrefix", "").strip()
-
-    ssm = _get_ssm_client(ssm_client)
-    ssm_param = os.environ.get("SSM_PROMPTS_PREFIX", "/kiro-cost-analyzer/prompts-prefix")
-
-    ssm.put_parameter(Name=ssm_param, Value=prompts_prefix, Type="String", Overwrite=True)
-
-    return {
-        "promptsPrefix": prompts_prefix,
-        "status": "valid",
-        "message": "Prompts prefix saved successfully",
     }
 
 

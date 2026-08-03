@@ -16,11 +16,9 @@ This sample applies defense-in-depth controls aligned with a STRIDE threat model
 | Identity bridging | Cognito sub ↔ Kiro userId linked via custom attribute |
 | Encryption | S3 AES-256 at rest. All AWS-managed connections use TLS in transit. The agent-to-GitLab connection follows the scheme configured for the GitLab instance (`https` recommended; `http` supported for a self-hosted instance served over plain HTTP per Requirement 10.3). Certificate verification is always enabled when `https` is used, with no opt-out — see [TLS certificate trust](deploy.md#tls-certificate-trust). The agent-to-GitHub connection is always `https`, with certificate verification always enabled. |
 
-## Known finding, planned fix — `s3:ListBucket` wildcard on the source-bucket validation endpoint
+## Resolved finding — source-bucket reconfiguration feature removed
 
-`template.yaml`'s `ValidateSourceBucket` IAM statement grants `s3:ListBucket` on `Resource: "arn:aws:s3:::*"` so `PUT /api/config/bucket` (`backend/handlers/config_handler.handle_put_config_bucket`) can call `HeadBucket` against an admin-supplied bucket name before persisting it — `HeadBucket` has no narrower dedicated IAM action. This has been flagged repeatedly by security scans as excessive scope (an attacker with access to this Lambda could enumerate bucket existence account-wide, though never read or write object data).
-
-**Planned fix (TODO, not yet implemented):** remove the "reconfigure source bucket" feature entirely — the Settings page's bucket field, the `PUT /api/config/bucket` route, `handle_put_config_bucket`, and the `ValidateSourceBucket` statement together. Changing the source bucket after initial deploy is expected to be rare; a redeploy with a new `SourceBucketName` template parameter is an acceptable path for the few who need it, and removing the hot-swap capability removes the wildcard grant rather than continuing to carry it as an accepted trade-off. Decided 2026-08-01.
+`template.yaml`'s `ValidateSourceBucket` IAM statement, which granted `s3:ListBucket` on `Resource: "arn:aws:s3:::*"` so `PUT /api/config/bucket` could validate an admin-supplied bucket name via `HeadBucket`, has been removed. The Settings page's bucket/prefix/prompts-prefix fields are now read-only, and `PUT /api/config/bucket`/`PUT /api/config/prompts-prefix` no longer exist. Changing the source bucket, source prefix, or prompts prefix after initial deployment now requires a redeploy with updated `SourceBucketName`, `SourcePrefix`, and `PromptsPrefix` template parameters (all three are required parameters — see `docs/deploy.md`).
 
 ## Threat model
 

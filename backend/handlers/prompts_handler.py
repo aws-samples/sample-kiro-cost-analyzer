@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 
 import boto3
@@ -21,6 +22,18 @@ from shared.categories import SYSTEM_CATEGORIES
 from shared.structured_logger import StructuredLogger
 
 logger = StructuredLogger("prompts-handler")
+
+# `request_id` is used to build an S3 key (`prompts-content/{request_id}.json`)
+# in `handle_get_prompt_detail`. The DynamoDB lookup that precedes the S3
+# read already provides implicit validation (only request IDs that exist
+# in the table proceed to the S3 read), but that is not an explicit
+# rejection of path-traversal characters — a future refactor that drops or
+# bypasses the DynamoDB check would silently reopen the S3 key to arbitrary
+# path segments. This pattern matches the shape produced by the writer
+# (`shared.analytics_writer` / ETL `requestId` field, itself sourced from
+# the Kiro CSV/prompt log's own `requestId`), and rejects `/`, `..`, and
+# other characters that could escape the `prompts-content/` prefix.
+_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 # Categories considered non-meaningful — excluded from default listing.
 # Sourced from ``shared.categories`` so the writer, the categorizer, and
@@ -274,6 +287,25 @@ def handle_get_prompt_detail(
             "message": "Prompt history is not enabled",
         }
 
+    # Explicit path-traversal guard, independent of the DynamoDB lookup
+    # below: reject any requestId that isn't alphanumeric/hyphen/underscore
+    # before it can ever reach the S3 key built further down. This is
+    # defense-in-depth — the DynamoDB lookup already only returns items
+    # for request IDs that exist, but that's an implicit check tied to
+    # data presence, not an explicit rejection of `../`-style input.
+    if not _REQUEST_ID_PATTERN.match(request_id):
+        logger.info(
+            "Invalid requestId format",
+            httpMethod="GET",
+            path=f"/api/prompts/{request_id}",
+            statusCode=400,
+        )
+        return {
+            "_status_code": 400,
+            "error": "InvalidParameters",
+            "message": "requestId contains invalid characters",
+        }
+
     # Query DynamoDB by requestId (GSI)
     table_name = os.environ.get("ANALYTICS_TABLE", "Analytics_Table")
     repo = AnalyticsRepository(table_name, dynamodb_resource=dynamodb_resource)
@@ -299,7 +331,19 @@ def handle_get_prompt_detail(
     response_content = item.get("response", "")
 
     if item.get("contentInS3") is True:
-        bucket_name = os.environ.get("DATA_BUCKET", "kiro-cost-analyzer-data")
+        # No hardcoded bucket-name fallback: `DATA_BUCKET` is always set by
+        # `template.yaml` (`!Ref DataBucket`) in every real deployment. A
+        # fallback like "kiro-cost-analyzer-data" would be a guessable,
+        # not-necessarily-owned bucket name (S3 bucket squatting risk) if
+        # this ever ran with the env var unset. Fail loudly instead.
+        bucket_name = os.environ.get("DATA_BUCKET")
+        if not bucket_name:
+            logger.error("DATA_BUCKET environment variable is not set", requestId=request_id)
+            return {
+                "_status_code": 500,
+                "error": "InternalError",
+                "message": "Server misconfiguration: DATA_BUCKET is not set",
+            }
         s3_key = f"prompts-content/{request_id}.json"
 
         client = s3_client or boto3.client("s3")

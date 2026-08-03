@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import datetime
 import os
-import traceback
 
 import boto3
 
@@ -98,11 +97,18 @@ def reconcile_users_handler(event, context):  # noqa: ARG001 - Lambda contract
         identity_client = boto3.client("identitystore")
         idc_user_ids = _list_idc_user_ids(identity_client, identity_store_id)
     except Exception as exc:
+        # errorMessage/stackTrace deliberately omitted: this handler is
+        # fail-safe by design (see docstring) and never re-raises, so
+        # unlike other ETL handlers there is no Step Functions execution
+        # history to fall back on for the full exception detail — the
+        # structured log is the only place it could land. A ClientError
+        # message/traceback can echo ARNs, IdentityStoreId, or other
+        # request details beyond what's needed to know *what* failed.
+        # errorType (e.g. AccessDeniedException, ThrottlingException) is
+        # sufficient to triage.
         logger.error(
             "Reconcile aborted — ListUsers failed",
             errorType=type(exc).__name__,
-            errorMessage=str(exc),
-            stackTrace=traceback.format_exc(),
         )
         return {
             "status": "error",
@@ -138,11 +144,13 @@ def reconcile_users_handler(event, context):  # noqa: ARG001 - Lambda contract
     try:
         rows = _scan_user_names_table(table)
     except Exception as exc:
+        # See the ListUsers except block above: this handler never
+        # re-raises, so errorMessage/stackTrace are omitted to avoid
+        # putting DynamoDB ClientError detail (table ARN, request IDs)
+        # into the structured log with no execution-history fallback.
         logger.error(
             "Reconcile aborted — UserNamesTable scan failed",
             errorType=type(exc).__name__,
-            errorMessage=str(exc),
-            stackTrace=traceback.format_exc(),
         )
         return {
             "status": "error",

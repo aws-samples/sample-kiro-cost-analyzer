@@ -21,6 +21,16 @@ import { useI18n } from '../i18n/useI18n';
 import { humanize } from '../utils/cronHumanizer';
 import type { AppConfig, EtlStatus, EtlSchedule } from '../types';
 
+const NOT_CONFIGURED_PLACEHOLDER = '—';
+
+// Exported for the Property 2 frontend-counterpart property test
+// (`SettingsPage.test.tsx`, feature `s3-source-config-readonly`), which
+// exercises this pure helper directly with arbitrary strings via
+// fast-check rather than re-deriving it through full component rendering.
+export function displayValue(value: string): string {
+  return value.trim() === '' ? NOT_CONFIGURED_PLACEHOLDER : value;
+}
+
 function etlStatusType(status: string): 'success' | 'error' | 'warning' | 'info' | 'stopped' {
   switch (status) {
     case 'success':
@@ -57,8 +67,6 @@ export default function SettingsPage() {
   const [etlStatus, setEtlStatus] = useState<EtlStatus | null>(null);
   const [schedule, setSchedule] = useState<EtlSchedule | null>(null);
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [savingPrompts, setSavingPrompts] = useState(false);
   const [savingIdentity, setSavingIdentity] = useState(false);
   const [sourceBucketRoleArn, setSourceBucketRoleArn] = useState('');
   const [identityStoreRoleArn, setIdentityStoreRoleArn] = useState<string>('');
@@ -106,32 +114,6 @@ export default function SettingsPage() {
     fetchConfig();
   }, [fetchConfig]);
 
-  const handleSave = async () => {
-    if (!bucketName.trim()) {
-      setError(t('settings.error.bucketNameRequired'));
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const resp = await put<{ status: string; message: string }>('/api/config/bucket', {
-        bucketName: bucketName.trim(),
-        sourcePrefix: sourcePrefix.trim(),
-      });
-      if (resp.status === 'error') {
-        setError(resp.message);
-      } else {
-        setSuccess(resp.message || t('settings.success.saved'));
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : t('settings.error.save');
-      setError(msg);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handleTriggerEtl = async () => {
     setTriggering(true);
     setTriggerMsg(null);
@@ -148,26 +130,6 @@ export default function SettingsPage() {
       setError(msg);
     } finally {
       setTriggering(false);
-    }
-  };
-
-  const handleSavePromptsPrefix = async () => {
-    setSavingPrompts(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const resp = await put<{ status: string; message: string }>('/api/config/prompts-prefix', {
-        promptsPrefix: promptsPrefix.trim(),
-      });
-      if (resp.status === 'error') {
-        setError(resp.message);
-      } else {
-        setSuccess(resp.message || t('settings.success.promptsPrefixSaved'));
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('settings.error.savePromptsPrefix'));
-    } finally {
-      setSavingPrompts(false);
     }
   };
 
@@ -288,54 +250,34 @@ export default function SettingsPage() {
     </Container>
   );
 
+  const promptsConfigError = error !== null;
+
   const dataContent = (
     <SpaceBetween size="l">
       <Container header={<Header variant="h2">{t('settings.bucket.title')}</Header>}>
-        <Form
-          actions={
-            <Button variant="primary" onClick={handleSave} loading={saving}>
-              {t('settings.bucket.submit')}
-            </Button>
-          }
-        >
-          <SpaceBetween size="m">
-            <FormField label={t('settings.bucket.nameField.label')} description={t('settings.bucket.nameField.description')}>
-              <Input
-                value={bucketName}
-                onChange={({ detail }) => setBucketName(detail.value)}
-                placeholder={t('settings.bucket.nameField.placeholder')}
-                disabled={loading}
-              />
-            </FormField>
-            <FormField label={t('settings.bucket.sourcePrefixField.label')} description={t('settings.bucket.sourcePrefixField.description')}>
-              <Input
-                value={sourcePrefix}
-                onChange={({ detail }) => setSourcePrefix(detail.value)}
-                placeholder={t('settings.bucket.sourcePrefixField.placeholder')}
-                disabled={loading}
-              />
-            </FormField>
-          </SpaceBetween>
-        </Form>
+        <ColumnLayout columns={2} variant="text-grid">
+          <div>
+            <Box variant="awsui-key-label">{t('settings.bucket.nameField.label')}</Box>
+            <div>{displayValue(bucketName)}</div>
+          </div>
+          <div>
+            <Box variant="awsui-key-label">{t('settings.bucket.sourcePrefixField.label')}</Box>
+            <div>{displayValue(sourcePrefix)}</div>
+          </div>
+        </ColumnLayout>
       </Container>
 
       <Container header={<Header variant="h2">{t('settings.prompts.title')}</Header>}>
-        <Form
-          actions={
-            <Button variant="primary" onClick={handleSavePromptsPrefix} loading={savingPrompts}>
-              {t('settings.prompts.submit')}
-            </Button>
-          }
-        >
-          <FormField label={t('settings.prompts.prefixField.label')} description={t('settings.prompts.prefixField.description')}>
-            <Input
-              value={promptsPrefix}
-              onChange={({ detail }) => setPromptsPrefix(detail.value)}
-              placeholder={t('settings.prompts.prefixField.placeholder')}
-              disabled={loading}
-            />
-          </FormField>
-        </Form>
+        {loading ? (
+          <StatusIndicator type="loading">{t('common.loading')}</StatusIndicator>
+        ) : promptsConfigError ? (
+          <StatusIndicator type="error">{t('common.error.loadData')}</StatusIndicator>
+        ) : (
+          <div>
+            <Box variant="awsui-key-label">{t('settings.prompts.prefixField.label')}</Box>
+            <div>{displayValue(promptsPrefix)}</div>
+          </div>
+        )}
       </Container>
 
       <Container header={<Header variant="h2">{t('settings.crossAccount.title')}</Header>}>

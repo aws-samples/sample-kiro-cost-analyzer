@@ -59,13 +59,21 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
 
   if (!res.ok) {
+    // Only the API's own `message` field (a safe, English, machine-authored
+    // string per the backend's response contract) is used as the error
+    // body. The raw response text is never used as a fallback — an
+    // unparseable body could be an HTML error page from an intermediary
+    // (API Gateway/CloudFront) or, in a backend bug scenario, an echo of
+    // request-supplied data, neither of which should be surfaced verbatim.
     const text = await res.text();
-    let apiMessage = text;
+    let apiMessage = `Erro na requisição (${res.status})`;
     try {
       const parsed = JSON.parse(text);
-      if (parsed.message) apiMessage = parsed.message;
+      if (typeof parsed.message === 'string' && parsed.message) {
+        apiMessage = parsed.message;
+      }
     } catch {
-      // keep raw text
+      // Not JSON — keep the generic fallback above.
     }
     throw new ApiError(res.status, apiMessage);
   }

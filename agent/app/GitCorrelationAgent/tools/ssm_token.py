@@ -14,9 +14,9 @@ ever changes its output shape, this pattern must change with it.
 
 Duplication note: `SSM_TOKEN_PATH_PREFIX` below is an intentional copy of
 `git_shared.git_providers.SSM_TOKEN_PATH_PREFIX`. The agent runs in its own
-AgentCore container (own `requirements.txt`/`pyproject.toml`, no shared
-Lambda layer attached), so it cannot import the `layers/shared` package the
-backend and the migrator use (see design DD-4). If the prefix ever changes
+AgentCore container (own `requirements.txt`, no shared Lambda layer
+attached), so it cannot import the `layers/shared` package the backend and
+the migrator use (see design DD-4). If the prefix ever changes
 in the shared layer, this literal must be updated to match.
 """
 

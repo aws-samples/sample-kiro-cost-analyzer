@@ -120,8 +120,7 @@ agent/app/GitCorrelationAgent/
 │   ├── __init__.py
 │   ├── github_tool.py         # @tool get_github_activity
 │   └── kiro_data.py           # @tool get_kiro_usage
-├── requirements.txt           # strands-agents, bedrock-agentcore, boto3, requests
-└── pyproject.toml
+└── requirements.txt           # strands-agents, bedrock-agentcore, boto3, requests
 ```
 
 ### 2. Agent Entrypoint (`main.py`)

@@ -108,6 +108,8 @@ def resolve_user_names(
                 # account, AccessDenied almost always means the assumed
                 # Identity_Store_Role is missing identitystore:DescribeUser
                 # (Requirement 8.2).
+                # exc_info intentionally False: the traceback can expose
+                # Identity Store API response details beyond errorType.
                 logger.warning(
                     "Access denied resolving user name via Identity Store "
                     "for userId=%s (errorType=%s). "
@@ -115,11 +117,11 @@ def resolve_user_names(
                     "(identitystore:DescribeUser) in the IDC account.",
                     user_id,
                     error_type,
-                    exc_info=True,
+                    exc_info=False,
                 )
             else:
                 logger.warning(
-                    "Failed to resolve user name for userId=%s", user_id, exc_info=True
+                    "Failed to resolve user name for userId=%s", user_id, exc_info=False
                 )
             # Tolerant fallback — Requirement 7.5.
             result[user_id] = ("", "")
@@ -141,7 +143,9 @@ def _get_cached_entry(table, user_id: str) -> UserNameEntry | None:
             resolvedAt=item.get("resolvedAt", ""),
         )
     except Exception:
-        logger.warning("Failed to read cache for userId=%s", user_id, exc_info=True)
+        # exc_info intentionally False: the traceback can echo DynamoDB
+        # table ARNs or other request/infrastructure details.
+        logger.warning("Failed to read cache for userId=%s", user_id, exc_info=False)
         return None
 
 
@@ -170,4 +174,6 @@ def _save_to_cache(
             }
         )
     except Exception:
-        logger.warning("Failed to write cache for userId=%s", user_id, exc_info=True)
+        # exc_info intentionally False: the traceback can echo DynamoDB
+        # table ARNs or other request/infrastructure details.
+        logger.warning("Failed to write cache for userId=%s", user_id, exc_info=False)

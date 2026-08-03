@@ -1,4 +1,14 @@
-"""Structured Logger — emits JSON-formatted log entries for Lambda observability."""
+"""Structured Logger — emits JSON-formatted log entries for Lambda observability.
+
+Usage guideline: only pass explicitly selected metadata fields as kwargs to
+`info`/`warning`/`error` (e.g. `errorType`, `s3Key`, `recordCount`, `userId`).
+Never pass an entire request/response body, exception object, or other
+caller-supplied payload as a single kwarg value — `_redact_sensitive` below
+only inspects field *names*, not values, so a payload stored under a
+generic key (e.g. `data`, `payload`, `response`) passes through unredacted
+even if it contains a secret. Extract only the specific fields you need to
+log before calling.
+"""
 
 from __future__ import annotations
 

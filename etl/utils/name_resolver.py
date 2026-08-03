@@ -90,5 +90,8 @@ def resolve_names(
             identity_client=identity_client,
         )
     except Exception:
-        logger.warning("Failed to resolve user names", exc_info=True)
+        # exc_info intentionally False: the traceback can echo DynamoDB
+        # table ARNs, Identity Store API response details, or other
+        # infrastructure metadata beyond what's needed to know this failed.
+        logger.warning("Failed to resolve user names", exc_info=False)
         return {uid: ("", "") for uid in user_ids}

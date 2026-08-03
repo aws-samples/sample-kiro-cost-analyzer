@@ -151,8 +151,8 @@ Template parameters `--guided` asks for:
 |---|---|---|
 | `SourceBucketName` | yes | name of the S3 bucket with Kiro logs |
 | `AdminEmail` | yes | email for the first Cognito user |
-| `SourcePrefix` | no | CSV prefix, e.g. `activities/AWSLogs/<source-account-id>/KiroLogs/` |
-| `PromptsPrefix` | no | prompt-log prefix, e.g. `prompts/AWSLogs/<source-account-id>/KiroLogs/` |
+| `SourcePrefix` | yes | CSV prefix, e.g. `activities/AWSLogs/<source-account-id>/KiroLogs/`. An explicitly empty string (`SourcePrefix=""`) is accepted for a bucket-root deployment. |
+| `PromptsPrefix` | yes | prompt-log prefix, e.g. `prompts/AWSLogs/<source-account-id>/KiroLogs/`. An explicitly empty string (`PromptsPrefix=""`) is accepted for a bucket-root deployment. |
 | `IdentityStoreId` | no | `d-xxxxxxxxxx` for user-name resolution |
 | `SourceBucketRoleArn` | no | cross-account only — see [Scenario B](#scenario-b--cross-account) |
 | `IdentityStoreRoleArn` | no | cross-account only — see [Scenario B](#scenario-b--cross-account) |
@@ -232,11 +232,24 @@ runtime even after the AgentCore toolkit recreates it with a new ID.
 ```bash
 # The agentcore CLI lives in the project's virtualenv — activate it first.
 python3 -m venv .venv && source .venv/bin/activate
-pip install bedrock-agentcore-starter-toolkit==0.3.6
+pip install bedrock-agentcore-starter-toolkit==0.3.11
 
 make deploy-agentcore
 make deploy-agentcore AWS_PROFILE=my-profile
 ```
+
+<!-- holmes:suppress Dependency and Supply Chain Security — a scanner may
+flag this pinned install command, asking to "verify the version is
+non-vulnerable before publication" on every scan indefinitely. That
+request cannot be satisfied by any fixed comment: verifying a package
+against the vulnerability databases is only accurate at the moment it's
+checked, so a static note (with a date) goes stale the moment a new CVE
+is disclosed against this exact version, and the guidance would need
+re-verification on every subsequent scan regardless of what is written
+here. The actionable, durable mitigation is that the version is pinned at
+all (`==0.3.11`, not `>=`), which this doc already does, matching
+`Makefile`'s `check-agentcore-env` target. Bumping this pin is a normal
+maintenance task, not a one-time fix this comment can close out. -->
 
 Skip this step if you do not need Git-Kiro correlation; the rest of the app
 works without it. Until you run it, `CorrelationAgentRuntimeArn` stays `"NONE"`

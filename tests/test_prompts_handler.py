@@ -693,6 +693,41 @@ class TestHandleGetPromptDetail:
         assert result["error"] == "InvalidParameters"
         assert result["message"] == "userId is required"
 
+    def test_returns_400_for_path_traversal_request_id(self):
+        """Holmes CSR finding: requestId must be rejected before it can be
+        interpolated into an S3 key (defense-in-depth against path
+        traversal), independent of the DynamoDB lookup that follows it."""
+        from backend.handlers.prompts_handler import handle_get_prompt_detail
+
+        with patch(
+            "backend.handlers.prompts_handler.AnalyticsRepository"
+        ) as MockRepo:
+            result = handle_get_prompt_detail(
+                request_id="../../etc/passwd",
+                query_params={"userId": "user-123"},
+                ssm_client=self._make_ssm_enabled(),
+            )
+
+        assert result["_status_code"] == 400
+        assert result["error"] == "InvalidParameters"
+        # The DynamoDB lookup must never be reached for an invalid requestId.
+        MockRepo.return_value.get_prompt_by_request_id.assert_not_called()
+
+    def test_returns_400_for_request_id_with_slash(self):
+        from backend.handlers.prompts_handler import handle_get_prompt_detail
+
+        with patch(
+            "backend.handlers.prompts_handler.AnalyticsRepository"
+        ) as MockRepo:
+            result = handle_get_prompt_detail(
+                request_id="abc/def",
+                query_params={"userId": "user-123"},
+                ssm_client=self._make_ssm_enabled(),
+            )
+
+        assert result["_status_code"] == 400
+        MockRepo.return_value.get_prompt_by_request_id.assert_not_called()
+
     def test_returns_403_when_feature_disabled(self):
         from backend.handlers.prompts_handler import handle_get_prompt_detail
 
@@ -991,7 +1026,10 @@ class TestHandleGetPromptDetail:
             mock_instance = MockRepo.return_value
             mock_instance.get_prompt_by_request_id.return_value = mock_item
 
-            # Remove DATA_BUCKET env var to test default
+            # DATA_BUCKET is always set by template.yaml in a real deploy.
+            # There is deliberately no hardcoded bucket-name fallback (S3
+            # bucket squatting risk) — an unset DATA_BUCKET fails loudly
+            # with a 500 instead of falling back to a guessable name.
             with patch.dict(os.environ, {}, clear=False):
                 os.environ.pop("DATA_BUCKET", None)
                 result = handle_get_prompt_detail(
@@ -1001,11 +1039,9 @@ class TestHandleGetPromptDetail:
                     ssm_client=self._make_ssm_enabled(),
                 )
 
-        mock_s3.get_object.assert_called_once_with(
-            Bucket="kiro-cost-analyzer-data",
-            Key="prompts-content/req-default-bucket.json",
-        )
-        assert result["prompt"] == "prompt from default bucket"
+        mock_s3.get_object.assert_not_called()
+        assert result["_status_code"] == 500
+        assert result["error"] == "InternalError"
 
 
 class TestLogSafetyVerification:

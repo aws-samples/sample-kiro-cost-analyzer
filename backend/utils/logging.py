@@ -1,10 +1,31 @@
-"""Structured Logger — emits JSON-formatted log entries for Lambda observability."""
+"""Structured Logger — emits JSON-formatted log entries for Lambda observability.
+
+Fallback copy of `layers/shared/shared/structured_logger.py`, used when the
+shared Lambda layer is not importable (e.g. local test execution outside the
+layer's runtime). Keep the redaction behavior in sync with that module — see
+its docstring for the "only log selected metadata fields" usage guideline.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
+
+_SENSITIVE_KEY_PATTERN = re.compile(
+    r"token|password|passwd|secret|credential|authorization|apikey|api_key|private[_-]?key",
+    re.IGNORECASE,
+)
+_REDACTED = "[REDACTED]"
+
+
+def _redact_sensitive(kwargs: dict) -> dict:
+    """Replace values of keys that look sensitive with a redaction marker."""
+    return {
+        key: (_REDACTED if _SENSITIVE_KEY_PATTERN.search(key) else value)
+        for key, value in kwargs.items()
+    }
 
 
 class StructuredLogger:
@@ -22,7 +43,7 @@ class StructuredLogger:
             "message": message,
             "lambda": self.lambda_name,
             "correlationId": self.correlation_id,
-            **kwargs,
+            **_redact_sensitive(kwargs),
         }
         print(json.dumps(entry, default=str))
 
