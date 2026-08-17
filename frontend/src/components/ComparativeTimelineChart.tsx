@@ -11,7 +11,7 @@ interface ComparativeTimelineChartProps {
 }
 
 export default function ComparativeTimelineChart({ timeline, loading }: ComparativeTimelineChartProps) {
-  const { t } = useI18n();
+  const { t, formatDate } = useI18n();
 
   const title = t('git.comparativeTimeline.title');
 
@@ -75,6 +75,9 @@ export default function ComparativeTimelineChart({ timeline, loading }: Comparat
         stackedBars
         height={350}
         xScaleType="categorical"
+        xTickFormatter={(date) =>
+          formatDate(date, { month: 'short', day: 'numeric', timeZone: 'UTC' })
+        }
         empty={<Box textAlign="center" color="inherit">{t('common.empty.noData')}</Box>}
         noMatch={<Box textAlign="center" color="inherit">{t('common.empty.noMatch')}</Box>}
         hideFilter={false}
