@@ -5,6 +5,7 @@ import Table from '@cloudscape-design/components/table';
 import Button from '@cloudscape-design/components/button';
 import Box from '@cloudscape-design/components/box';
 import Alert from '@cloudscape-design/components/alert';
+import Modal from '@cloudscape-design/components/modal';
 import Select, { type SelectProps } from '@cloudscape-design/components/select';
 import FormField from '@cloudscape-design/components/form-field';
 import GitRepoForm from '../components/GitRepoForm';
@@ -32,11 +33,15 @@ export default function GitSettingsPage() {
   const [showRepoForm, setShowRepoForm] = useState(false);
   const [repoError, setRepoError] = useState<string | null>(null);
   const [repoSuccess, setRepoSuccess] = useState<string | null>(null);
+  const [repoDeleteTarget, setRepoDeleteTarget] = useState<GitRepository | null>(null);
+  const [deletingRepo, setDeletingRepo] = useState(false);
 
   const [mappings, setMappings] = useState<GitUserMapping[]>([]);
   const [mappingsLoading, setMappingsLoading] = useState(false);
   const [mappingError, setMappingError] = useState<string | null>(null);
   const [mappingSuccess, setMappingSuccess] = useState<string | null>(null);
+  const [mappingDeleteTarget, setMappingDeleteTarget] = useState<GitUserMapping | null>(null);
+  const [deletingMapping, setDeletingMapping] = useState(false);
 
   const [userOptions, setUserOptions] = useState<SelectProps.Option[]>([]);
   const [selectedMappingUser, setSelectedMappingUser] = useState<SelectProps.Option | null>(null);
@@ -96,14 +101,19 @@ export default function GitSettingsPage() {
     fetchRepos();
   }
 
-  async function handleDeleteRepo(repoId: string) {
+  async function handleDeleteRepo() {
+    if (!repoDeleteTarget) return;
+    setDeletingRepo(true);
     setRepoError(null);
     try {
-      await deleteGitRepo(repoId);
+      await deleteGitRepo(repoDeleteTarget.repoId);
       setRepoSuccess(t('gitSettings.repos.success.removed'));
       fetchRepos();
     } catch (err) {
       setRepoError(err instanceof Error ? err.message : t('gitSettings.repos.error.delete'));
+    } finally {
+      setDeletingRepo(false);
+      setRepoDeleteTarget(null);
     }
   }
 
@@ -113,14 +123,19 @@ export default function GitSettingsPage() {
     return result;
   }
 
-  async function handleDeleteMapping(m: GitUserMapping) {
+  async function handleDeleteMapping() {
+    if (!mappingDeleteTarget) return;
+    setDeletingMapping(true);
     setMappingError(null);
     try {
-      await deleteGitMapping(m.userId, m.provider);
+      await deleteGitMapping(mappingDeleteTarget.userId, mappingDeleteTarget.provider);
       setMappingSuccess(t('gitSettings.mappings.success.removed'));
       if (selectedMappingUser?.value) fetchMappings(selectedMappingUser.value);
     } catch (err) {
       setMappingError(err instanceof Error ? err.message : t('gitSettings.mappings.error.delete'));
+    } finally {
+      setDeletingMapping(false);
+      setMappingDeleteTarget(null);
     }
   }
 
@@ -165,7 +180,7 @@ export default function GitSettingsPage() {
               id: 'actions',
               header: t('gitSettings.repos.header.actions'),
               cell: (item) => (
-                <Button iconName="remove" variant="icon" onClick={() => handleDeleteRepo(item.repoId)} ariaLabel={t('gitSettings.repos.action.remove')} />
+                <Button iconName="remove" variant="icon" onClick={() => setRepoDeleteTarget(item)} ariaLabel={t('gitSettings.repos.action.remove')} />
               ),
               width: 80,
             },
@@ -224,7 +239,7 @@ export default function GitSettingsPage() {
                 id: 'actions',
                 header: t('gitSettings.mappings.header.actions'),
                 cell: (item) => (
-                  <Button iconName="remove" variant="icon" onClick={() => handleDeleteMapping(item)} ariaLabel={t('gitSettings.mappings.action.remove')} />
+                  <Button iconName="remove" variant="icon" onClick={() => setMappingDeleteTarget(item)} ariaLabel={t('gitSettings.mappings.action.remove')} />
                 ),
                 width: 80,
               },
@@ -235,6 +250,60 @@ export default function GitSettingsPage() {
 
           <GitMappingForm userOptions={userOptions} onSubmit={handleCreateMapping} />
         </SpaceBetween>
+
+        {/* Repository Delete Confirmation Modal */}
+        <Modal
+          visible={repoDeleteTarget !== null}
+          onDismiss={() => setRepoDeleteTarget(null)}
+          header={t('gitSettings.repos.deleteModal.title')}
+          footer={
+            <Box float="right">
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button variant="link" onClick={() => setRepoDeleteTarget(null)}>
+                  {t('common.cancel')}
+                </Button>
+                <Button variant="primary" onClick={handleDeleteRepo} loading={deletingRepo}>
+                  {t('gitSettings.repos.deleteModal.submit')}
+                </Button>
+              </SpaceBetween>
+            </Box>
+          }
+        >
+          <SpaceBetween size="m">
+            <Alert type="warning">{t('gitSettings.repos.deleteModal.warning')}</Alert>
+            <Box>
+              {t('gitSettings.repos.deleteModal.confirm')}{' '}
+              <strong>{repoDeleteTarget?.name}</strong> (<strong>{repoDeleteTarget?.url}</strong>)?
+            </Box>
+          </SpaceBetween>
+        </Modal>
+
+        {/* Mapping Delete Confirmation Modal */}
+        <Modal
+          visible={mappingDeleteTarget !== null}
+          onDismiss={() => setMappingDeleteTarget(null)}
+          header={t('gitSettings.mappings.deleteModal.title')}
+          footer={
+            <Box float="right">
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button variant="link" onClick={() => setMappingDeleteTarget(null)}>
+                  {t('common.cancel')}
+                </Button>
+                <Button variant="primary" onClick={handleDeleteMapping} loading={deletingMapping}>
+                  {t('gitSettings.mappings.deleteModal.submit')}
+                </Button>
+              </SpaceBetween>
+            </Box>
+          }
+        >
+          <SpaceBetween size="m">
+            <Alert type="warning">{t('gitSettings.mappings.deleteModal.warning')}</Alert>
+            <Box>
+              {t('gitSettings.mappings.deleteModal.confirm')}{' '}
+              <strong>{mappingDeleteTarget?.userId}</strong> → <strong>{mappingDeleteTarget?.gitUsername}</strong> (<strong>{mappingDeleteTarget?.provider}</strong>)?
+            </Box>
+          </SpaceBetween>
+        </Modal>
       </SpaceBetween>
   );
 }

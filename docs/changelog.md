@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Feature — Confirmation modal before deleting a Git repo or mapping
+
+- Deleting a repository or a user-Git mapping on the Git settings page now opens a confirmation modal identifying the target (repository `name` + `url`; mapping `userId` + `gitUsername` + `provider`) instead of firing immediately from the icon button. The modal mirrors the existing `UsersPage` delete-confirmation pattern and is fully internationalized (en + pt-BR). Closes #11.
+
 ### Fix — Timeline chart date labels are concise and locale-aware
 
 - Format timeline X-axis ticks as abbreviated month and day values in the active UI locale instead of displaying the native JavaScript `Date.toString()` value with time and timezone details. Calendar-date values are formatted in UTC so users west of UTC do not see the previous day.
