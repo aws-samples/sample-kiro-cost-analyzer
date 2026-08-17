@@ -130,6 +130,35 @@ function getRemoveButtonForRow(gitUsername: string): HTMLButtonElement {
   return button as HTMLButtonElement;
 }
 
+/**
+ * Clicks the confirmation modal's primary (submit) button. The modal must
+ * already be open (i.e. the remove icon was clicked first).
+ */
+async function confirmMappingDeletion(): Promise<void> {
+  const submitLabel = i18n.t('gitSettings.mappings.deleteModal.submit');
+  const submitButton = await screen.findByRole('button', { name: submitLabel });
+  await act(async () => {
+    fireEvent.click(submitButton);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+/**
+ * Clicks the confirmation modal's cancel button. Anchors on the
+ * mapping-specific warning text because both modals share the same title.
+ */
+async function cancelMappingDeletion(): Promise<void> {
+  const warningText = i18n.t('gitSettings.mappings.deleteModal.warning');
+  await screen.findByText(warningText);
+  const cancelLabel = i18n.t('common.cancel');
+  const cancelButtons = screen.getAllByRole('button', { name: cancelLabel });
+  await act(async () => {
+    fireEvent.click(cancelButtons[cancelButtons.length - 1]);
+    await Promise.resolve();
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   listGitReposMock.mockResolvedValue({ repositories: [] });
@@ -184,8 +213,12 @@ describe('GitSettingsPage — mapping deletion (Req 9.6, 9.7)', () => {
     await act(async () => {
       fireEvent.click(removeButton);
       await Promise.resolve();
-      await Promise.resolve();
     });
+
+    // Icon click only opens the modal — nothing deleted yet (Req 2.1).
+    expect(deleteGitMappingMock).not.toHaveBeenCalled();
+
+    await confirmMappingDeletion();
 
     expect(deleteGitMappingMock).toHaveBeenCalledTimes(1);
     expect(deleteGitMappingMock).toHaveBeenCalledWith(
@@ -217,8 +250,11 @@ describe('GitSettingsPage — mapping deletion (Req 9.6, 9.7)', () => {
     await act(async () => {
       fireEvent.click(removeButton);
       await Promise.resolve();
-      await Promise.resolve();
     });
+
+    expect(deleteGitMappingMock).not.toHaveBeenCalled();
+
+    await confirmMappingDeletion();
 
     expect(deleteGitMappingMock).toHaveBeenCalledTimes(1);
     expect(deleteGitMappingMock).toHaveBeenCalledWith(
@@ -250,7 +286,78 @@ describe('GitSettingsPage — mapping deletion (Req 9.6, 9.7)', () => {
       fireEvent.click(removeButton);
     });
 
+    await confirmMappingDeletion();
+
     const successText = i18n.t('gitSettings.mappings.success.removed');
     expect(await screen.findByText(successText)).toBeInTheDocument();
+  });
+});
+
+describe('GitSettingsPage — delete confirmation modal (Feature: git-settings-delete-confirmation)', () => {
+  // Feature: git-settings-delete-confirmation, Property 1: No deletion without confirmation
+  it('does not call deleteGitMapping when the modal is canceled', async () => {
+    await setLocaleFor('en');
+    deleteGitMappingMock.mockResolvedValue({ status: 'deleted' });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(listGitReposMock).toHaveBeenCalled();
+    });
+
+    await selectTheSeededMappingUser('Target User');
+
+    await waitFor(() => {
+      expect(listGitMappingsMock).toHaveBeenCalledWith(TARGET_USER_ID);
+    });
+
+    await screen.findByText(MAPPING_ROW_GITLAB.gitUsername);
+
+    const removeButton = getRemoveButtonForRow(MAPPING_ROW_GITLAB.gitUsername);
+    await act(async () => {
+      fireEvent.click(removeButton);
+      await Promise.resolve();
+    });
+
+    await cancelMappingDeletion();
+
+    // Canceling results in zero delete calls (Req 2.4). Note: Cloudscape
+    // keeps the closed modal's content mounted in the DOM under jsdom, so
+    // the property is asserted on the API mock, not on DOM absence.
+    expect(deleteGitMappingMock).not.toHaveBeenCalled();
+  });
+
+  // Feature: git-settings-delete-confirmation, Property 3: Modal identifies the target
+  it('shows the target userId, gitUsername and provider in the modal body', async () => {
+    await setLocaleFor('en');
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(listGitReposMock).toHaveBeenCalled();
+    });
+
+    await selectTheSeededMappingUser('Target User');
+
+    await waitFor(() => {
+      expect(listGitMappingsMock).toHaveBeenCalledWith(TARGET_USER_ID);
+    });
+
+    await screen.findByText(MAPPING_ROW_GITLAB.gitUsername);
+
+    const removeButton = getRemoveButtonForRow(MAPPING_ROW_GITLAB.gitUsername);
+    await act(async () => {
+      fireEvent.click(removeButton);
+      await Promise.resolve();
+    });
+
+    const modalWarning = i18n.t('gitSettings.mappings.deleteModal.warning');
+    await screen.findByText(modalWarning);
+
+    // Modal body identifies the exact target (Req 2.2). The gitUsername
+    // appears both in the table row and in the modal, so assert at least 2.
+    expect(screen.getAllByText(MAPPING_ROW_GITLAB.gitUsername).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(MAPPING_ROW_GITLAB.userId).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(modalWarning)).toBeInTheDocument();
   });
 });
