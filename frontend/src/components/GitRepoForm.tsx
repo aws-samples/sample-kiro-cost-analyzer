@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Modal from '@cloudscape-design/components/modal';
 import FormField from '@cloudscape-design/components/form-field';
 import Input from '@cloudscape-design/components/input';
@@ -9,6 +9,7 @@ import Box from '@cloudscape-design/components/box';
 import Alert from '@cloudscape-design/components/alert';
 import { useI18n } from '../i18n/useI18n';
 import { buildProviderOptions } from '../constants/gitProviders';
+import type { GitRepository } from '../types';
 
 function isValidUrl(url: string): boolean {
   try {
@@ -23,12 +24,19 @@ interface GitRepoFormProps {
   visible: boolean;
   onDismiss: () => void;
   onSubmit: (data: { name: string; url: string; provider: string; accessToken: string }) => Promise<void>;
+  /**
+   * When set, the form opens in edit mode prefilled with this repository.
+   * In edit mode the token field is optional — a blank token means "keep
+   * the current token" (the page omits accessToken from the PATCH body).
+   */
+  editTarget?: GitRepository | null;
 }
 
-export default function GitRepoForm({ visible, onDismiss, onSubmit }: GitRepoFormProps) {
+export default function GitRepoForm({ visible, onDismiss, onSubmit, editTarget }: GitRepoFormProps) {
   const { t } = useI18n();
 
   const PROVIDER_OPTIONS: SelectProps.Option[] = buildProviderOptions(t);
+  const isEdit = editTarget != null;
 
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
@@ -42,6 +50,21 @@ export default function GitRepoForm({ visible, onDismiss, onSubmit }: GitRepoFor
   const [providerError, setProviderError] = useState('');
   const [tokenError, setTokenError] = useState('');
 
+  // Prefill in edit mode; token is always collected fresh (never echoed).
+  useEffect(() => {
+    if (visible && editTarget) {
+      setName(editTarget.name);
+      setUrl(editTarget.url);
+      setProvider(PROVIDER_OPTIONS.find((o) => o.value === editTarget.provider) ?? null);
+      setAccessToken('');
+      setError(null);
+      setNameError(''); setUrlError(''); setProviderError(''); setTokenError('');
+    }
+    // PROVIDER_OPTIONS is rebuilt per render from t(); keying the effect on
+    // the target identity + visibility is sufficient for prefill.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, editTarget]);
+
   function resetForm() {
     setName(''); setUrl(''); setProvider(null); setAccessToken(''); setError(null);
     setNameError(''); setUrlError(''); setProviderError(''); setTokenError('');
@@ -54,7 +77,8 @@ export default function GitRepoForm({ visible, onDismiss, onSubmit }: GitRepoFor
     else if (!isValidUrl(url.trim())) { setUrlError(t('gitRepoForm.field.url.error.invalid')); valid = false; }
     else { setUrlError(''); }
     if (!provider?.value) { setProviderError(t('gitRepoForm.field.provider.error')); valid = false; } else { setProviderError(''); }
-    if (!accessToken.trim()) { setTokenError(t('gitRepoForm.field.token.error')); valid = false; } else { setTokenError(''); }
+    // Token is required only when creating; in edit mode blank = keep current.
+    if (!isEdit && !accessToken.trim()) { setTokenError(t('gitRepoForm.field.token.error')); valid = false; } else { setTokenError(''); }
     return valid;
   }
 
@@ -67,7 +91,7 @@ export default function GitRepoForm({ visible, onDismiss, onSubmit }: GitRepoFor
       resetForm();
       onDismiss();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('gitRepoForm.error.generic'));
+      setError(err instanceof Error ? err.message : t(isEdit ? 'gitRepoForm.error.update' : 'gitRepoForm.error.generic'));
     } finally {
       setSaving(false);
     }
@@ -77,12 +101,12 @@ export default function GitRepoForm({ visible, onDismiss, onSubmit }: GitRepoFor
     <Modal
       visible={visible}
       onDismiss={() => { resetForm(); onDismiss(); }}
-      header={t('gitRepoForm.title')}
+      header={t(isEdit ? 'gitRepoForm.editTitle' : 'gitRepoForm.title')}
       footer={
         <Box float="right">
           <SpaceBetween size="xs" direction="horizontal">
             <Button variant="link" onClick={() => { resetForm(); onDismiss(); }}>{t('common.cancel')}</Button>
-            <Button variant="primary" onClick={handleSubmit} loading={saving}>{t('gitRepoForm.submit')}</Button>
+            <Button variant="primary" onClick={handleSubmit} loading={saving}>{t(isEdit ? 'gitRepoForm.submitEdit' : 'gitRepoForm.submit')}</Button>
           </SpaceBetween>
         </Box>
       }
@@ -106,7 +130,7 @@ export default function GitRepoForm({ visible, onDismiss, onSubmit }: GitRepoFor
         <FormField
           label={t('gitRepoForm.field.token.label')}
           errorText={tokenError}
-          description={t('gitRepoForm.field.token.description')}
+          description={t(isEdit ? 'gitRepoForm.field.token.editDescription' : 'gitRepoForm.field.token.description')}
         >
           <Input value={accessToken} onChange={({ detail }) => setAccessToken(detail.value)} type="password" />
         </FormField>

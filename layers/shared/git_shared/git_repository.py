@@ -178,6 +178,35 @@ class GitRepository:
             ExpressionAttributeValues=attr_values,
         )
 
+    def update_repo_config_fields(self, repo_id: str, fields: dict) -> None:
+        """Partially update the CONFIG item, setting only the provided fields.
+
+        Uses expression-attribute-name aliases for every field so DynamoDB
+        reserved words (e.g. ``name``, ``status``, ``url``) are always safe.
+        Immutable identity fields (``PK``, ``SK``) cannot be touched because
+        they are never part of the SET expression.
+
+        Args:
+            repo_id: Repository identifier.
+            fields: Mapping of attribute name to new value. Must be non-empty.
+
+        Raises:
+            ValueError: If ``fields`` is empty.
+        """
+        if not fields:
+            raise ValueError("fields must not be empty")
+
+        attr_names = {f"#f{i}": key for i, key in enumerate(fields)}
+        attr_values = {f":v{i}": value for i, (_, value) in enumerate(fields.items())}
+        update_expr = "SET " + ", ".join(f"#f{i} = :v{i}" for i in range(len(fields)))
+
+        self._table.update_item(
+            Key={"PK": f"GITREPO#{repo_id}", "SK": "CONFIG"},
+            UpdateExpression=update_expr,
+            ExpressionAttributeNames=attr_names,
+            ExpressionAttributeValues=attr_values,
+        )
+
     # ------------------------------------------------------------------
     # 2. User-Git mappings  (PK=USER#{userId}, SK=GITMAP#{provider})
     # ------------------------------------------------------------------

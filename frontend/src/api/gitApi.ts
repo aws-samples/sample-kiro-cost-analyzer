@@ -1,4 +1,4 @@
-import { get, post, del } from './client';
+import { get, post, patch, del } from './client';
 import type {
   GitRepository,
   GitUserMapping,
@@ -21,6 +21,18 @@ export function createGitRepo(body: {
 
 export function listGitRepos(): Promise<{ repositories: GitRepository[] }> {
   return get<{ repositories: GitRepository[] }>('/api/git/repos');
+}
+
+/** Partial update body for a repository. Omit accessToken to keep the current token. */
+export interface GitRepoPatch {
+  name?: string;
+  url?: string;
+  provider?: string;
+  accessToken?: string;
+}
+
+export function updateGitRepo(repoId: string, body: GitRepoPatch): Promise<GitRepository> {
+  return patch<GitRepository>(`/api/git/repos/${repoId}`, body);
 }
 
 export function deleteGitRepo(repoId: string): Promise<{ status: string }> {

@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Feature — Edit a Git repo and rotate its access token in place
+
+- New `PATCH /api/git/repos/{repoId}` endpoint accepting any subset of `name`, `url`, `provider`, `accessToken`. Metadata edits keep `repoId`, `createdAt`, and history intact; submitting a new token overwrites the SSM SecureString at the existing parameter path (rotation in place). The token is never returned by the API and never logged. The Git settings repos table gains an Edit action opening the repository form in edit mode (fields prefilled; blank token keeps the current one). Closes #13.
+
 ### Fix — Summary card numbers no longer wrap mid-value
 
 - KPI values at or above 10,000 are abbreviated with locale-aware compact notation (e.g. `10.3K` in en, `10,3 mil` in pt-BR) and all card values render with `white-space: nowrap`, so large numbers no longer break across two lines in the KPI grids. Applied consistently to the Dashboard, Account Usage, User detail, Git activity, and Productivity summary cards via a shared `formatCardValue` utility. Closes #20.
