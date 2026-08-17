@@ -8,7 +8,8 @@ s3-source-config-readonly feature (design task 8) landed and stayed landed:
   that changing the source bucket/prefixes requires a redeploy.
 - `docs/changelog.md` no longer carries the old "TODO (planned, not yet
   implemented)" heading for the source-bucket hot-swap removal verbatim, and
-  now has an `## Unreleased` entry mentioning `ValidateSourceBucket`.
+  keeps an entry mentioning `ValidateSourceBucket` (originally under
+  `## Unreleased`, promoted to a versioned section on release).
 
 Follows the `Path(__file__).resolve().parent.parent` repo-root resolution
 pattern used elsewhere in this suite (e.g.
@@ -80,23 +81,16 @@ def test_changelog_doc_no_longer_has_planned_todo_heading(changelog_doc_text: st
     )
 
 
-def test_changelog_doc_has_unreleased_entry_mentioning_validate_source_bucket(
+def test_changelog_doc_has_entry_mentioning_validate_source_bucket(
     changelog_doc_text: str,
 ) -> None:
-    """A new Unreleased entry describes the ValidateSourceBucket removal."""
-    assert "## Unreleased" in changelog_doc_text, (
-        "docs/changelog.md must have an '## Unreleased' section"
-    )
+    """A changelog entry describes the ValidateSourceBucket removal.
 
-    unreleased_start = changelog_doc_text.index("## Unreleased")
-    next_version_heading = changelog_doc_text.find("\n## ", unreleased_start + len("## Unreleased"))
-    unreleased_section = (
-        changelog_doc_text[unreleased_start:next_version_heading]
-        if next_version_heading != -1
-        else changelog_doc_text[unreleased_start:]
-    )
-
-    assert "ValidateSourceBucket" in unreleased_section, (
-        "docs/changelog.md's '## Unreleased' section must mention "
-        "ValidateSourceBucket"
+    The entry originally lived under ``## Unreleased``; release promotions
+    (e.g. v3.4) move it under a versioned heading, so this guard only
+    requires the mention to exist somewhere in the changelog.
+    """
+    assert "ValidateSourceBucket" in changelog_doc_text, (
+        "docs/changelog.md must mention ValidateSourceBucket (the removal of "
+        "its wildcard IAM grant must stay documented)"
     )
