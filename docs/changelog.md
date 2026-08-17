@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Fix — Timeline chart date labels are concise and locale-aware
+
+- Format timeline X-axis ticks as abbreviated month and day values in the active UI locale instead of displaying the native JavaScript `Date.toString()` value with time and timezone details. Calendar-date values are formatted in UTC so users west of UTC do not see the previous day.
+
 ### Security — Second Holmes CSR pass: KMS region scoping, path traversal, log hygiene
 
 Ran a follow-up Holmes CSR scan after the fixes below. Findings and fixes:

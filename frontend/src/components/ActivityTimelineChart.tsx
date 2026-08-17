@@ -10,7 +10,7 @@ interface ActivityTimelineChartProps {
 }
 
 export default function ActivityTimelineChart({ timeline, loading }: ActivityTimelineChartProps) {
-  const { t } = useI18n();
+  const { t, formatDate } = useI18n();
 
   const series = [
     {
@@ -51,6 +51,9 @@ export default function ActivityTimelineChart({ timeline, loading }: ActivityTim
           xTitle={t('productivity.activityTimeline.xAxis')}
           yTitle={t('productivity.activityTimeline.yAxis')}
           xScaleType="time"
+          xTickFormatter={(date) =>
+            formatDate(date, { month: 'short', day: 'numeric', timeZone: 'UTC' })
+          }
           height={300}
           empty={<Box textAlign="center" color="inherit">{t('common.empty.noData')}</Box>}
           noMatch={<Box textAlign="center" color="inherit">{t('common.empty.noMatch')}</Box>}

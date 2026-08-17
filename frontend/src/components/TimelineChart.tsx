@@ -11,7 +11,7 @@ interface TimelineChartProps {
 }
 
 export default function TimelineChart({ timeline, loading }: TimelineChartProps) {
-  const { t } = useI18n();
+  const { t, formatDate } = useI18n();
 
   const series = [
     {
@@ -46,6 +46,9 @@ export default function TimelineChart({ timeline, loading }: TimelineChartProps)
           xTitle={t('timeline.axis.period')}
           yTitle={t('timeline.axis.value')}
           xScaleType="time"
+          xTickFormatter={(date) =>
+            formatDate(date, { month: 'short', day: 'numeric', timeZone: 'UTC' })
+          }
           height={300}
           empty={
             <Box textAlign="center" color="inherit">
