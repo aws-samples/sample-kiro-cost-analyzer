@@ -3,6 +3,7 @@ import Box from '@cloudscape-design/components/box';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
 import { useI18n } from '../i18n/useI18n';
+import { formatCardValue } from '../utils/formatCardValue';
 import type { UserDetailSummary } from '../types';
 
 interface UserSummaryCardsProps {
@@ -10,13 +11,14 @@ interface UserSummaryCardsProps {
   loading: boolean;
 }
 
+/** Prevents mid-number line wraps inside the KPI grid (issue #20). */
+const nowrap = (content: string) => <span style={{ whiteSpace: 'nowrap' }}>{content}</span>;
+
 export default function UserSummaryCards({ summary, loading }: UserSummaryCardsProps) {
   const { t, formatNumber } = useI18n();
 
-  const fmt = (n: number) =>
-    formatNumber(n, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-  const fmtInt = (n: number) => formatNumber(n);
+  const fmt = (n: number) => nowrap(formatCardValue(n, formatNumber));
+  const fmtInt = (n: number) => nowrap(formatCardValue(n, formatNumber, { fractionDigits: 0 }));
 
   if (loading) {
     return (

@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Fix — Summary card numbers no longer wrap mid-value
+
+- KPI values at or above 10,000 are abbreviated with locale-aware compact notation (e.g. `10.3K` in en, `10,3 mil` in pt-BR) and all card values render with `white-space: nowrap`, so large numbers no longer break across two lines in the KPI grids. Applied consistently to the Dashboard, Account Usage, User detail, Git activity, and Productivity summary cards via a shared `formatCardValue` utility. Closes #20.
+
 ### Feature — Confirmation modal before deleting a Git repo or mapping
 
 - Deleting a repository or a user-Git mapping on the Git settings page now opens a confirmation modal identifying the target (repository `name` + `url`; mapping `userId` + `gitUsername` + `provider`) instead of firing immediately from the icon button. The modal mirrors the existing `UsersPage` delete-confirmation pattern and is fully internationalized (en + pt-BR). Closes #11.

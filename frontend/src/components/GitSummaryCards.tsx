@@ -3,6 +3,7 @@ import Box from '@cloudscape-design/components/box';
 import Header from '@cloudscape-design/components/header';
 import Spinner from '@cloudscape-design/components/spinner';
 import { useI18n } from '../i18n/useI18n';
+import { formatCardValue } from '../utils/formatCardValue';
 import type { GitActivitySummary } from '../types';
 
 interface GitSummaryCardsProps {
@@ -10,8 +11,14 @@ interface GitSummaryCardsProps {
   loading: boolean;
 }
 
+/** Prevents mid-number line wraps inside the KPI grid (issue #20). */
+const nowrap = (content: string) => <span style={{ whiteSpace: 'nowrap' }}>{content}</span>;
+
 export default function GitSummaryCards({ summary, loading }: GitSummaryCardsProps) {
   const { t, formatNumber } = useI18n();
+
+  const fmtInt = (n: number) => nowrap(formatCardValue(n, formatNumber, { fractionDigits: 0 }));
+  const fmtAvg = (n: number) => nowrap(formatCardValue(n, formatNumber, { fractionDigits: 1 }));
 
   if (loading) {
     return (
@@ -22,12 +29,12 @@ export default function GitSummaryCards({ summary, loading }: GitSummaryCardsPro
   }
 
   const items = [
-    { label: t('git.summary.totalCommits'), value: summary?.totalCommits != null ? formatNumber(summary.totalCommits) : '—' },
-    { label: t('git.summary.totalPRsMerged'), value: summary?.totalPRsMerged != null ? formatNumber(summary.totalPRsMerged) : '—' },
-    { label: t('git.summary.totalReviews'), value: summary?.totalReviews != null ? formatNumber(summary.totalReviews) : '—' },
-    { label: t('git.summary.avgLinesPerCommit'), value: summary?.avgLinesPerCommit != null ? formatNumber(summary.avgLinesPerCommit, { maximumFractionDigits: 1 }) : '—' },
-    { label: t('git.summary.totalPRsOpened'), value: summary?.totalPRsOpened != null ? formatNumber(summary.totalPRsOpened) : '—' },
-    { label: t('git.summary.avgMergeTimeHours'), value: summary?.avgMergeTimeHours != null ? formatNumber(summary.avgMergeTimeHours, { maximumFractionDigits: 1 }) : '—' },
+    { label: t('git.summary.totalCommits'), value: summary?.totalCommits != null ? fmtInt(summary.totalCommits) : '—' },
+    { label: t('git.summary.totalPRsMerged'), value: summary?.totalPRsMerged != null ? fmtInt(summary.totalPRsMerged) : '—' },
+    { label: t('git.summary.totalReviews'), value: summary?.totalReviews != null ? fmtInt(summary.totalReviews) : '—' },
+    { label: t('git.summary.avgLinesPerCommit'), value: summary?.avgLinesPerCommit != null ? fmtAvg(summary.avgLinesPerCommit) : '—' },
+    { label: t('git.summary.totalPRsOpened'), value: summary?.totalPRsOpened != null ? fmtInt(summary.totalPRsOpened) : '—' },
+    { label: t('git.summary.avgMergeTimeHours'), value: summary?.avgMergeTimeHours != null ? fmtAvg(summary.avgMergeTimeHours) : '—' },
   ];
 
   return (
