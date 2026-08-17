@@ -15,7 +15,7 @@ import pytest
 from botocore.exceptions import ClientError
 from moto import mock_aws
 
-from backend.handlers.git_repo_handler import handle_create_repo
+from backend.handlers.git_repo_handler import handle_create_repo, handle_update_repo
 
 
 TABLE_NAME = "TestAnalyticsTable"
@@ -222,3 +222,205 @@ class TestValidationErrors:
         )
         assert result["_status_code"] == 400
         assert result["error"] == "ValidationError"
+
+
+# ------------------------------------------------------------------
+# PATCH /api/git/repos/{repoId} — partial update / token rotation
+# Feature: git-repo-edit-token-rotation
+# ------------------------------------------------------------------
+
+
+def _create_seed_repo(aws_env, valid_body, claims) -> str:
+    """Creates a repo via the real create handler and returns its repoId."""
+    result = handle_create_repo(
+        valid_body,
+        claims,
+        dynamodb_resource=aws_env["ddb"],
+        ssm_client=aws_env["ssm"],
+    )
+    assert result["_status_code"] == 201
+    return result["repoId"]
+
+
+class TestUpdateRepoIdentityStability:
+    """Feature: git-repo-edit-token-rotation, Property 1: Identity stability."""
+
+    def test_identity_fields_unchanged_after_full_patch(
+        self, aws_env, valid_body, claims
+    ):
+        repo_id = _create_seed_repo(aws_env, valid_body, claims)
+        table = aws_env["ddb"].Table(TABLE_NAME)
+        before = table.get_item(Key={"PK": f"GITREPO#{repo_id}", "SK": "CONFIG"})["Item"]
+
+        result = handle_update_repo(
+            repo_id,
+            {
+                "name": "renamed-repo",
+                "url": "https://example.com/org/renamed",
+                "provider": "gitlab",
+                "accessToken": "glpat_new_rotated_token",
+            },
+            claims,
+            dynamodb_resource=aws_env["ddb"],
+            ssm_client=aws_env["ssm"],
+        )
+
+        assert "_status_code" not in result  # 200
+        after = table.get_item(Key={"PK": f"GITREPO#{repo_id}", "SK": "CONFIG"})["Item"]
+        assert result["repoId"] == repo_id
+        assert after["createdAt"] == before["createdAt"]
+        assert after["createdBy"] == before["createdBy"]
+        assert after["ssmTokenPath"] == before["ssmTokenPath"]
+        assert result["createdAt"] == before["createdAt"]
+
+
+class TestUpdateRepoPartiality:
+    """Feature: git-repo-edit-token-rotation, Property 2: Partiality."""
+
+    def test_metadata_only_patch_keeps_token_untouched(
+        self, aws_env, valid_body, claims
+    ):
+        repo_id = _create_seed_repo(aws_env, valid_body, claims)
+        ssm_path = f"/kiro-cost-analyzer/git-tokens/{repo_id}"
+
+        result = handle_update_repo(
+            repo_id,
+            {"name": "typo-fixed"},
+            claims,
+            dynamodb_resource=aws_env["ddb"],
+            ssm_client=aws_env["ssm"],
+        )
+
+        assert result["name"] == "typo-fixed"
+        # Absent fields retained
+        assert result["url"] == valid_body["url"]
+        assert result["provider"] == valid_body["provider"]
+        # Token untouched
+        got = aws_env["ssm"].get_parameter(Name=ssm_path, WithDecryption=True)
+        assert got["Parameter"]["Value"] == valid_body["accessToken"]
+
+    def test_token_only_patch_rotates_in_place_and_keeps_metadata(
+        self, aws_env, valid_body, claims
+    ):
+        repo_id = _create_seed_repo(aws_env, valid_body, claims)
+        ssm_path = f"/kiro-cost-analyzer/git-tokens/{repo_id}"
+        new_token = "ghp_rotated_token_value_2"
+
+        result = handle_update_repo(
+            repo_id,
+            {"accessToken": new_token},
+            claims,
+            dynamodb_resource=aws_env["ddb"],
+            ssm_client=aws_env["ssm"],
+        )
+
+        # Same parameter path now holds the new token (rotation in place)
+        got = aws_env["ssm"].get_parameter(Name=ssm_path, WithDecryption=True)
+        assert got["Parameter"]["Value"] == new_token
+        # Metadata retained
+        assert result["name"] == valid_body["name"]
+        assert result["url"] == valid_body["url"]
+        assert result["tokenConfigured"] is True
+
+
+class TestUpdateRepoSecretHygiene:
+    """Feature: git-repo-edit-token-rotation, Property 3: Secret hygiene."""
+
+    def test_token_never_in_response_or_persisted_item(
+        self, aws_env, valid_body, claims
+    ):
+        repo_id = _create_seed_repo(aws_env, valid_body, claims)
+        new_token = "ghp_secret_rotation_value"
+
+        result = handle_update_repo(
+            repo_id,
+            {"accessToken": new_token, "name": "renamed"},
+            claims,
+            dynamodb_resource=aws_env["ddb"],
+            ssm_client=aws_env["ssm"],
+        )
+
+        assert new_token not in str(result)
+        assert "ssmTokenPath" not in result
+        table = aws_env["ddb"].Table(TABLE_NAME)
+        item = table.get_item(Key={"PK": f"GITREPO#{repo_id}", "SK": "CONFIG"})["Item"]
+        assert new_token not in str(item)
+
+
+class TestUpdateRepoValidationAndErrors:
+    def test_unknown_repo_returns_404(self, aws_env, claims):
+        result = handle_update_repo(
+            "nonexistent",
+            {"name": "x"},
+            claims,
+            dynamodb_resource=aws_env["ddb"],
+            ssm_client=aws_env["ssm"],
+        )
+        assert result["_status_code"] == 404
+        assert result["error"] == "NotFound"
+
+    def test_empty_body_returns_400(self, aws_env, valid_body, claims):
+        repo_id = _create_seed_repo(aws_env, valid_body, claims)
+        result = handle_update_repo(
+            repo_id, {}, claims,
+            dynamodb_resource=aws_env["ddb"], ssm_client=aws_env["ssm"],
+        )
+        assert result["_status_code"] == 400
+        assert result["error"] == "ValidationError"
+
+    def test_irrelevant_fields_only_returns_400(self, aws_env, valid_body, claims):
+        repo_id = _create_seed_repo(aws_env, valid_body, claims)
+        result = handle_update_repo(
+            repo_id, {"status": "SYNC_OK", "repoId": "hijack"}, claims,
+            dynamodb_resource=aws_env["ddb"], ssm_client=aws_env["ssm"],
+        )
+        assert result["_status_code"] == 400
+
+    def test_invalid_url_returns_400(self, aws_env, valid_body, claims):
+        repo_id = _create_seed_repo(aws_env, valid_body, claims)
+        result = handle_update_repo(
+            repo_id, {"url": "not-a-url"}, claims,
+            dynamodb_resource=aws_env["ddb"], ssm_client=aws_env["ssm"],
+        )
+        assert result["_status_code"] == 400
+
+    def test_unsupported_provider_returns_400(self, aws_env, valid_body, claims):
+        repo_id = _create_seed_repo(aws_env, valid_body, claims)
+        result = handle_update_repo(
+            repo_id, {"provider": "subversion"}, claims,
+            dynamodb_resource=aws_env["ddb"], ssm_client=aws_env["ssm"],
+        )
+        assert result["_status_code"] == 400
+
+    def test_short_token_returns_400(self, aws_env, valid_body, claims):
+        repo_id = _create_seed_repo(aws_env, valid_body, claims)
+        result = handle_update_repo(
+            repo_id, {"accessToken": "short"}, claims,
+            dynamodb_resource=aws_env["ddb"], ssm_client=aws_env["ssm"],
+        )
+        assert result["_status_code"] == 400
+
+    def test_ssm_failure_aborts_without_metadata_change(
+        self, aws_env, valid_body, claims
+    ):
+        repo_id = _create_seed_repo(aws_env, valid_body, claims)
+        failing_ssm = MagicMock()
+        failing_ssm.put_parameter.side_effect = ClientError(
+            {"Error": {"Code": "InternalServerError", "Message": "boom"}},
+            "PutParameter",
+        )
+
+        result = handle_update_repo(
+            repo_id,
+            {"name": "should-not-persist", "accessToken": "ghp_new_token_value"},
+            claims,
+            dynamodb_resource=aws_env["ddb"],
+            ssm_client=failing_ssm,
+        )
+
+        assert result["_status_code"] == 500
+        assert "ghp_new_token_value" not in str(result)
+        # Metadata untouched (SSM-before-DynamoDB ordering)
+        table = aws_env["ddb"].Table(TABLE_NAME)
+        item = table.get_item(Key={"PK": f"GITREPO#{repo_id}", "SK": "CONFIG"})["Item"]
+        assert item["name"] == valid_body["name"]

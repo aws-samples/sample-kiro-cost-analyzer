@@ -16,10 +16,12 @@ import { get, ApiError } from '../api/client';
 import {
   listGitRepos,
   createGitRepo,
+  updateGitRepo,
   deleteGitRepo,
   listGitMappings,
   createGitMapping,
   deleteGitMapping,
+  type GitRepoPatch,
 } from '../api/gitApi';
 import type { GitRepository, GitUserMapping, GitMappingCreated, UsageResponse } from '../types';
 
@@ -35,6 +37,7 @@ export default function GitSettingsPage() {
   const [repoSuccess, setRepoSuccess] = useState<string | null>(null);
   const [repoDeleteTarget, setRepoDeleteTarget] = useState<GitRepository | null>(null);
   const [deletingRepo, setDeletingRepo] = useState(false);
+  const [repoEditTarget, setRepoEditTarget] = useState<GitRepository | null>(null);
 
   const [mappings, setMappings] = useState<GitUserMapping[]>([]);
   const [mappingsLoading, setMappingsLoading] = useState(false);
@@ -98,6 +101,21 @@ export default function GitSettingsPage() {
   async function handleCreateRepo(data: { name: string; url: string; provider: string; accessToken: string }) {
     await createGitRepo(data);
     setRepoSuccess(t('gitSettings.repos.success.added'));
+    fetchRepos();
+  }
+
+  async function handleUpdateRepo(data: { name: string; url: string; provider: string; accessToken: string }) {
+    if (!repoEditTarget) return;
+    // Blank token means "keep the current token" — omit it from the patch.
+    const body: GitRepoPatch = {
+      name: data.name,
+      url: data.url,
+      provider: data.provider,
+      ...(data.accessToken ? { accessToken: data.accessToken } : {}),
+    };
+    await updateGitRepo(repoEditTarget.repoId, body);
+    setRepoSuccess(t('gitSettings.repos.success.updated'));
+    setRepoEditTarget(null);
     fetchRepos();
   }
 
@@ -180,16 +198,24 @@ export default function GitSettingsPage() {
               id: 'actions',
               header: t('gitSettings.repos.header.actions'),
               cell: (item) => (
-                <Button iconName="remove" variant="icon" onClick={() => setRepoDeleteTarget(item)} ariaLabel={t('gitSettings.repos.action.remove')} />
+                <SpaceBetween size="xxs" direction="horizontal">
+                  <Button iconName="edit" variant="icon" onClick={() => setRepoEditTarget(item)} ariaLabel={t('gitSettings.repos.action.edit')} />
+                  <Button iconName="remove" variant="icon" onClick={() => setRepoDeleteTarget(item)} ariaLabel={t('gitSettings.repos.action.remove')} />
+                </SpaceBetween>
               ),
-              width: 80,
+              width: 110,
             },
           ]}
           items={repos}
           trackBy="repoId"
         />
 
-        <GitRepoForm visible={showRepoForm} onDismiss={() => setShowRepoForm(false)} onSubmit={handleCreateRepo} />
+        <GitRepoForm
+          visible={showRepoForm || repoEditTarget !== null}
+          onDismiss={() => { setShowRepoForm(false); setRepoEditTarget(null); }}
+          onSubmit={repoEditTarget ? handleUpdateRepo : handleCreateRepo}
+          editTarget={repoEditTarget}
+        />
 
         {mappingError && <Alert type="error" dismissible onDismiss={() => setMappingError(null)}>{mappingError}</Alert>}
         {mappingSuccess && <Alert type="success" dismissible onDismiss={() => setMappingSuccess(null)}>{mappingSuccess}</Alert>}

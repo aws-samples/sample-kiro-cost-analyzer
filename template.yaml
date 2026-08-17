@@ -778,7 +778,7 @@ Resources:
         DestinationArn: !GetAtt ApiGatewayAccessLogGroup.Arn
         Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","user":"$context.identity.user","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","integrationLatency":"$context.integrationLatency"}'
       Cors:
-        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowMethods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
         AllowHeaders: "'Content-Type,Authorization'"
         AllowOrigin: !Sub "'https://${CloudFrontDistribution.DomainName}'"
       Auth:
@@ -1821,6 +1821,12 @@ Resources:
             RestApiId: !Ref ApiGateway
             Path: /api/git/repos/{repoId}
             Method: DELETE
+        GitReposPatch:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/git/repos/{repoId}
+            Method: PATCH
         GitRepoSync:
           Type: Api
           Properties:

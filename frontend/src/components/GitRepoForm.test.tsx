@@ -76,3 +76,56 @@ describe('GitRepoForm provider options', () => {
     await setLocaleFor('en');
   });
 });
+
+describe('GitRepoForm edit mode (Feature: git-repo-edit-token-rotation)', () => {
+  const EDIT_TARGET = {
+    repoId: 'abc12345',
+    name: 'existing-repo',
+    url: 'https://github.com/org/existing-repo',
+    provider: 'github' as const,
+    tokenConfigured: true,
+    status: 'ACTIVE' as const,
+    lastSyncAt: null,
+    createdAt: '2026-06-01T00:00:00+00:00',
+  };
+
+  function renderEditForm(onSubmit = vi.fn().mockResolvedValue(undefined)) {
+    const utils = render(
+      <I18nProvider>
+        <GitRepoForm visible onDismiss={vi.fn()} onSubmit={onSubmit} editTarget={EDIT_TARGET} />
+      </I18nProvider>,
+    );
+    return { ...utils, onSubmit };
+  }
+
+  it('prefills name and url and uses edit-mode strings', async () => {
+    await setLocaleFor('en');
+    renderEditForm();
+
+    expect(screen.getByDisplayValue(EDIT_TARGET.name)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(EDIT_TARGET.url)).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('gitRepoForm.editTitle'))).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: i18n.t('gitRepoForm.submitEdit') }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(i18n.t('gitRepoForm.field.token.editDescription')),
+    ).toBeInTheDocument();
+  });
+
+  it('submits with a blank token (token optional in edit mode)', async () => {
+    await setLocaleFor('en');
+    const { onSubmit } = renderEditForm();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: i18n.t('gitRepoForm.submitEdit') }));
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith({
+      name: EDIT_TARGET.name,
+      url: EDIT_TARGET.url,
+      provider: EDIT_TARGET.provider,
+      accessToken: '',
+    });
+  });
+});

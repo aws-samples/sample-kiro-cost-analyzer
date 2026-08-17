@@ -572,6 +572,20 @@ def _route(http_method: str, path: str, query_params: dict, body: dict, claims: 
             status_code = result.pop("_status_code", 200) if isinstance(result, dict) else 200
             return _build_response(status_code, result)
 
+    # PATCH /api/git/repos/{repoId} — partial update / token rotation
+    if http_method == "PATCH":
+        match = _GIT_REPO_DETAIL_PATTERN.match(path)
+        if match:
+            if not _is_admin(claims):
+                return _build_response(403, {
+                    "error": "Forbidden",
+                    "message": "Access restricted to administrators",
+                })
+            repo_id = match.group(1)
+            result = git_repo_handler.handle_update_repo(repo_id, body, claims)
+            status_code = result.pop("_status_code", 200) if isinstance(result, dict) else 200
+            return _build_response(status_code, result)
+
     # POST /api/git/mappings — create mapping
     if http_method == "POST" and path == "/api/git/mappings":
         if not _is_admin(claims):

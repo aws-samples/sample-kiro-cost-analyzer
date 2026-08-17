@@ -227,6 +227,160 @@ def handle_delete_repo(
     return {"message": f"Repository {repo_id} removed successfully"}
 
 
+def handle_update_repo(
+    repo_id: str,
+    body: dict,
+    claims: dict,
+    dynamodb_resource=None,
+    ssm_client=None,
+) -> dict:
+    """Handle PATCH /api/git/repos/{repoId} — partial update / token rotation.
+
+    Accepts any subset of ``{name, url, provider, accessToken}``. When
+    ``accessToken`` is present, the SSM SecureString at the repository's
+    existing ``ssmTokenPath`` is overwritten in place (rotation), keeping
+    ``repoId`` and the parameter path stable. Metadata fields are updated
+    via a targeted UpdateExpression, so ``repoId``, ``createdAt``,
+    ``createdBy``, and ``ssmTokenPath`` are never modified.
+
+    The SSM write happens BEFORE the DynamoDB update: a failed token write
+    aborts the request with 500 and leaves metadata untouched.
+
+    Args:
+        repo_id: Repository identifier from the URL path.
+        body: Parsed JSON request body (patch).
+        claims: Cognito claims of the caller (admin gate is enforced in the
+            dispatcher; claims are accepted here for parity with create).
+        dynamodb_resource: Optional boto3 DynamoDB resource (tests).
+        ssm_client: Optional boto3 SSM client (tests).
+
+    Returns:
+        The updated repository in the same shape as ``handle_list_repos``
+        items (``tokenConfigured`` boolean; the token value and
+        ``ssmTokenPath`` are never returned), or an error dict with
+        ``_status_code``.
+    """
+    table_name = os.environ.get("ANALYTICS_TABLE", "Analytics_Table")
+    repo = GitRepository(table_name, dynamodb_resource=dynamodb_resource)
+
+    config = repo.get_repo_config(repo_id)
+    if not config:
+        return {
+            "error": "NotFound",
+            "message": f"Repository not found: {repo_id}",
+            "_status_code": 404,
+        }
+
+    allowed_fields = {"name", "url", "provider", "accessToken"}
+    provided = {k: v for k, v in (body or {}).items() if k in allowed_fields}
+    if not provided:
+        return {
+            "error": "ValidationError",
+            "message": "Provide at least one of: name, url, provider, accessToken.",
+            "_status_code": 400,
+        }
+
+    name = provided.get("name")
+    if name is not None and (not isinstance(name, str) or not name.strip()):
+        return {
+            "error": "ValidationError",
+            "message": "Name must be a non-empty string.",
+            "_status_code": 400,
+        }
+
+    url = provided.get("url")
+    if url is not None and not _validate_url(url):
+        return {
+            "error": "ValidationError",
+            "message": f"Invalid URL: {url}",
+            "_status_code": 400,
+        }
+
+    provider = provided.get("provider")
+    if provider is not None and provider not in SUPPORTED_PROVIDERS:
+        return {
+            "error": "ValidationError",
+            "message": (
+                f"Unsupported provider: {provider}. "
+                f"Valid providers: {', '.join(sorted(SUPPORTED_PROVIDERS))}"
+            ),
+            "_status_code": 400,
+        }
+
+    access_token = provided.pop("accessToken", None)
+    if access_token is not None:
+        # Security: same bounds as create — reject tokens that are too
+        # short (likely invalid) or too long (potential injection).
+        if not isinstance(access_token, str) or len(access_token) < 10 or len(access_token) > 500:
+            return {
+                "error": "ValidationError",
+                "message": "Access token must be between 10 and 500 characters.",
+                "_status_code": 400,
+            }
+        ssm_token_path = config.get("ssmTokenPath", "")
+        if not ssm_token_path:
+            # Defensive: a CONFIG item always carries ssmTokenPath (set at
+            # create); reuse the deterministic path if it is ever absent.
+            ssm_token_path = f"{_SSM_TOKEN_PATH_PREFIX}/{repo_id}"
+        ssm = ssm_client or boto3.client("ssm")
+        try:
+            # Rotation in place: same parameter path, Overwrite=True — the
+            # token value is never logged.
+            ssm.put_parameter(
+                Name=ssm_token_path,
+                Value=access_token,
+                Type="SecureString",
+                Overwrite=True,
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to rotate token in SSM",
+                repoId=repo_id,
+                errorType=type(exc).__name__,
+            )
+            return {
+                "error": "InternalError",
+                "message": "Failed to rotate access token.",
+                "_status_code": 500,
+            }
+        if not config.get("ssmTokenPath"):
+            provided["ssmTokenPath"] = ssm_token_path
+
+    if provided:
+        try:
+            repo.update_repo_config_fields(repo_id, provided)
+        except Exception as exc:
+            logger.error(
+                "Failed to update repo config",
+                repoId=repo_id,
+                errorType=type(exc).__name__,
+            )
+            return {
+                "error": "InternalError",
+                "message": "Failed to update repository configuration.",
+                "_status_code": 500,
+            }
+
+    updated = repo.get_repo_config(repo_id) or {}
+    changed_fields = sorted(list(provided) + (["accessToken"] if access_token else []))
+    # NOTE: url is deliberately omitted from the log line (internal hostnames);
+    # the token value is never logged.
+    logger.info("Git repository updated", repoId=repo_id, fields=changed_fields)
+
+    return {
+        "repoId": repo_id,
+        "name": updated.get("name", ""),
+        "url": updated.get("url", ""),
+        "provider": updated.get("provider", ""),
+        "tokenConfigured": bool(updated.get("ssmTokenPath")),
+        "status": updated.get("status", "ACTIVE"),
+        "lastSyncAt": updated.get("lastSyncAt"),
+        "createdAt": updated.get("createdAt", ""),
+        # NOTE: ssmTokenPath, accessToken, and any secret fields are
+        # intentionally excluded from this response.
+    }
+
+
 def handle_manual_sync(repo_id: str, **kwargs) -> dict:
     """Manual sync is no longer supported — agent fetches data on-demand."""
     return {
