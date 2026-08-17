@@ -2,7 +2,7 @@
 
 > Back to [README](../README.md)
 
-## Unreleased
+## v3.4 — Git Settings Usability, UI Fixes & Security Hardening (2026-08-17)
 
 ### Feature — Edit a Git repo and rotate its access token in place
 
