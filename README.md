@@ -154,7 +154,7 @@ End-to-end patterns you can lift into your own work:
 
 This sample was built end-to-end with [Kiro](https://kiro.dev) using a spec-driven development flow. The codebase, infrastructure, i18n catalogs, threat model, and most of the prose in this README and `docs/` were produced in collaboration with Kiro.
 
-The repository contains roughly **20 specs** under [`.kiro/specs/`](.kiro/specs/), each composed of `requirements.md` (user stories with `SHALL/WHEN/THEN` acceptance criteria), `design.md` (components, interfaces, data models, correctness properties), and `tasks.md` (an implementation plan back-traceable to requirements). Codebase conventions live in [`.kiro/steering/development-standards.md`](.kiro/steering/development-standards.md) so Kiro applies them consistently across sessions and contributors.
+The repository contains roughly **25 specs** under [`.kiro/specs/`](.kiro/specs/), each composed of `requirements.md` (user stories with `SHALL/WHEN/THEN` acceptance criteria), `design.md` (components, interfaces, data models, correctness properties), and `tasks.md` (an implementation plan back-traceable to requirements). Codebase conventions live in [`.kiro/steering/development-standards.md`](.kiro/steering/development-standards.md) so Kiro applies them consistently across sessions and contributors.
 
 To extend or contribute using Kiro, [CONTRIBUTING.md](CONTRIBUTING.md#using-kiro-when-contributing) explains what fits a spec, what fits a vibe-coding session, and what to keep out of the agent loop.
 
