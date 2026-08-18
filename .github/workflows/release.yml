@@ -1,0 +1,53 @@
+name: Release
+
+# Manually-triggered release: bumps VERSION, promotes the changelog's
+# Unreleased section, and opens a Release PR. Tag + GitHub Release happen
+# in publish-release.yml when the PR merges (VERSION change reaches main).
+#
+# The changelog content itself is human-written per PR (steering §8.4) —
+# this workflow only does the mechanical promotion.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump type
+        required: true
+        type: choice
+        options: [minor, patch, major]
+        default: minor
+      title:
+        description: Release title (used in the changelog heading)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Promote changelog and bump VERSION
+        id: promote
+        run: |
+          NEW_VERSION=$(python3 scripts/promote_changelog.py --bump "${{ inputs.bump }}" --title "${{ inputs.title }}")
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Open Release PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: release/v${{ steps.promote.outputs.version }}
+          commit-message: "chore: release v${{ steps.promote.outputs.version }}"
+          title: "chore: release v${{ steps.promote.outputs.version }} — ${{ inputs.title }}"
+          body: |
+            Automated release PR.
+
+            - Bumps `VERSION` to `${{ steps.promote.outputs.version }}`
+            - Promotes the changelog `Unreleased` section to `v${{ steps.promote.outputs.version }} — ${{ inputs.title }}`
+
+            On merge, `publish-release.yml` creates the `v${{ steps.promote.outputs.version }}` tag and the GitHub Release with the promoted changelog section as notes.
+          delete-branch: true

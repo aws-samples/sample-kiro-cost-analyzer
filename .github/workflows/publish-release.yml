@@ -1,0 +1,48 @@
+name: Publish Release
+
+# Creates the annotated git tag and the GitHub Release when a VERSION
+# change lands on main (i.e. when a Release PR from release.yml merges).
+# Idempotent: an existing tag short-circuits without failing.
+
+on:
+  push:
+    branches: [main]
+    paths: [VERSION]
+
+permissions:
+  contents: write
+
+jobs:
+  tag-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: version
+        run: echo "version=$(cat VERSION | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if tag exists
+        id: tagcheck
+        run: |
+          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract release notes from the changelog
+        if: steps.tagcheck.outputs.exists == 'false'
+        run: python3 scripts/promote_changelog.py --extract "${{ steps.version.outputs.version }}" > /tmp/release-notes.md
+
+      - name: Create tag and GitHub Release
+        if: steps.tagcheck.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "v$VERSION"
+          gh release create "v$VERSION" --title "v$VERSION" --notes-file /tmp/release-notes.md

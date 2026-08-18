@@ -1,6 +1,15 @@
 /// <reference types="vitest/config" />
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+// Single version source: the root VERSION file. Read at config-eval time —
+// a missing file fails the build loudly instead of embedding a placeholder.
+const appVersion = readFileSync(
+  fileURLToPath(new URL('../VERSION', import.meta.url)),
+  'utf-8',
+).trim()
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -9,6 +18,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     define: {
       global: 'globalThis',
+      __APP_VERSION__: JSON.stringify(appVersion),
     },
     build: {
       rollupOptions: {

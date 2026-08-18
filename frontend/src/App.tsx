@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router';
 import AppLayout from '@cloudscape-design/components/app-layout';
 import SideNavigation, { type SideNavigationProps } from '@cloudscape-design/components/side-navigation';
-import TopNavigation from '@cloudscape-design/components/top-navigation';
+import TopNavigation, { type TopNavigationProps } from '@cloudscape-design/components/top-navigation';
 import Box from '@cloudscape-design/components/box';
 import Spinner from '@cloudscape-design/components/spinner';
 import { AuthProvider } from './auth/AuthProvider';
@@ -22,6 +22,17 @@ import AdminPage from './pages/AdminPage';
 function AppContent() {
   const { isAuthenticated, loading, logout, user, newPasswordRequired } = useAuth();
   const { t } = useI18n();
+
+  // Small version badge shown in the header of every layout. The value is
+  // injected at build time from the root VERSION file and is locale-neutral
+  // (brand-like: never translated). Links to the changelog on GitHub.
+  const versionUtility: TopNavigationProps.Utility = {
+    type: 'button',
+    text: `v${__APP_VERSION__}`,
+    href: 'https://github.com/aws-samples/sample-kiro-cost-analyzer/blob/main/docs/changelog.md',
+    external: true,
+    externalIconAriaLabel: t('nav.versionAriaLabel'),
+  };
   const isAdmin = user?.groups?.includes('Admins') ?? false;
   // Renders the gear-icon utility for the TopNavigation and the modal it
   // opens. The utility is spread into `utilities` below; the modal node
@@ -83,7 +94,7 @@ function AppContent() {
         <div id="top-nav">
           <TopNavigation
             identity={{ title: t('brand.productName'), href: '/' }}
-            utilities={[settingsMenu.utility]}
+            utilities={[versionUtility, settingsMenu.utility]}
           />
         </div>
         {settingsMenu.modalNode}
@@ -103,6 +114,8 @@ function AppContent() {
         <TopNavigation
           identity={{ title: t('brand.productName'), href: '/' }}
           utilities={[
+            // Version badge (links to the changelog on GitHub).
+            versionUtility,
             // Gear icon opens the user settings modal (language + visual mode).
             settingsMenu.utility,
             // User email dropdown with sign-out.
