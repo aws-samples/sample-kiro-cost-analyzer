@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+### Feature — UX quick wins: productivity ranking, login fold, settings gear label
+
+- The Productivity page now shows a top-10 "most active users" ranking (by total credits, using the already-fetched usage data) instead of an empty state; rows link to each user's productivity analysis. Closes #17.
+- The login hero image is capped at 180px (previously inflated by a 1.5x scale transform), keeping the sign-in form above the fold on standard viewports. Closes #23.
+- The settings gear tooltip now reads "Language & theme" instead of a generic label, clarifying that it opens display preferences (available pre-auth by design — see the i18n spec's Requirement 3.1). Closes #25.
+
 ## v3.5 — Git Settings Epic Completion & Readable User Identifiers (2026-08-18)
 
 ### Fix — Human-readable user identifiers instead of raw UUIDs
