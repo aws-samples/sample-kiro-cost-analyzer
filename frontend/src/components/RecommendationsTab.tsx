@@ -192,7 +192,7 @@ export default function RecommendationsTab({ dateParams }: RecommendationsTabPro
           {
             id: 'user',
             header: t('recommendations.table.header.user'),
-            cell: (item) => item.displayName || item.userId,
+            cell: (item) => item.displayName || `${item.userId.slice(0, 8)}…`,
           },
           {
             id: 'currentTier',

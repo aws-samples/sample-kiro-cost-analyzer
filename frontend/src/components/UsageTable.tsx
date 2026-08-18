@@ -181,7 +181,7 @@ export default function UsageTable({ users, loading }: UsageTableProps) {
                     navigate(`/user/${item.userId}`);
                   }}
                 >
-                  {item.displayName || item.userId}
+                  {item.displayName || item.userName || `${item.userId.slice(0, 8)}…`}
                 </Link> &nbsp;
                 <TierBadge
                   recommendation={rec}

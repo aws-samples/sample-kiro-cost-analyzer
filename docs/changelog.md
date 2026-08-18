@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Fix — Human-readable user identifiers instead of raw UUIDs
+
+- Unresolved Identity Center users no longer surface raw UUIDs as the primary identifier: the backend user-metadata lookup now falls back to `userName` when `displayName` is empty (fixing the usage listing, user detail, and recommendations in one place), and the frontend adds a terminal fallback chain (`displayName` → `userName` → truncated id) in the usage and recommendations tables. The Git settings mapping delete modal now shows the resolved display name. Closes #18.
+
 ### Feature — Git settings: all-mappings view by default and token status indicator
 
 - The mappings table now shows all user-Git mappings on page load (new paginated `GET /api/git/mappings` endpoint with `limit` + opaque `lastKey` cursor), with the user selector demoted from prerequisite to optional filter and a "Load more" affordance for additional pages. Closes #12.
