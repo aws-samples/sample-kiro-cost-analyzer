@@ -1,8 +1,16 @@
 name: Release
 
 # Manually-triggered release: bumps VERSION, promotes the changelog's
-# Unreleased section, and opens a Release PR. Tag + GitHub Release happen
-# in publish-release.yml when the PR merges (VERSION change reaches main).
+# Unreleased section, and pushes a release branch. Tag + GitHub Release
+# happen in publish-release.yml when the Release PR merges (VERSION change
+# reaches main).
+#
+# NOTE: the aws-samples organization policy forbids GitHub Actions from
+# creating pull requests ("GitHub Actions is not permitted to create or
+# approve pull requests"), and the repo-level setting cannot override it
+# (HTTP 409). So this workflow pushes the release branch and prints the
+# ready-made PR-creation link/command in the run summary — opening the PR
+# is the one manual step.
 #
 # The changelog content itself is human-written per PR (steering §8.4) —
 # this workflow only does the mechanical promotion.
@@ -23,10 +31,9 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
-  release-pr:
+  release-branch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,17 +44,36 @@ jobs:
           NEW_VERSION=$(python3 scripts/promote_changelog.py --bump "${{ inputs.bump }}" --title "${{ inputs.title }}")
           echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Open Release PR
-        uses: peter-evans/create-pull-request@v7
-        with:
-          branch: release/v${{ steps.promote.outputs.version }}
-          commit-message: "chore: release v${{ steps.promote.outputs.version }}"
-          title: "chore: release v${{ steps.promote.outputs.version }} — ${{ inputs.title }}"
-          body: |
-            Automated release PR.
+      - name: Push release branch
+        id: push
+        run: |
+          VERSION="${{ steps.promote.outputs.version }}"
+          BRANCH="release/v$VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add VERSION docs/changelog.md
+          git commit -m "chore: release v$VERSION"
+          git push origin "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
-            - Bumps `VERSION` to `${{ steps.promote.outputs.version }}`
-            - Promotes the changelog `Unreleased` section to `v${{ steps.promote.outputs.version }} — ${{ inputs.title }}`
-
-            On merge, `publish-release.yml` creates the `v${{ steps.promote.outputs.version }}` tag and the GitHub Release with the promoted changelog section as notes.
-          delete-branch: true
+      - name: Print PR-creation instructions
+        run: |
+          VERSION="${{ steps.promote.outputs.version }}"
+          BRANCH="${{ steps.push.outputs.branch }}"
+          {
+            echo "## Release v$VERSION — one manual step left"
+            echo ""
+            echo "The org policy prevents Actions from opening PRs. Open the Release PR yourself:"
+            echo ""
+            echo "**Option A — link:** https://github.com/${{ github.repository }}/pull/new/$BRANCH"
+            echo ""
+            echo "**Option B — gh CLI:**"
+            echo '```bash'
+            echo "gh pr create --repo ${{ github.repository }} --base main --head $BRANCH \\"
+            echo "  --title \"chore: release v$VERSION — ${{ inputs.title }}\" \\"
+            echo "  --body \"Automated release promotion. On merge, publish-release.yml creates the v$VERSION tag and GitHub Release.\""
+            echo '```'
+            echo ""
+            echo "On merge, \`publish-release.yml\` creates the tag and the GitHub Release automatically."
+          } >> "$GITHUB_STEP_SUMMARY"
