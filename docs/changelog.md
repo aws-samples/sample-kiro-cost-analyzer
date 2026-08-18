@@ -2,6 +2,13 @@
 
 > Back to [README](../README.md)
 
+## Unreleased
+
+### Feature — Release automation and version badge in the header
+
+- New release flow: changelog entries still accumulate under `Unreleased` (hand-written per PR), and the **Release** GitHub Actions workflow now mechanizes the rest — it bumps the new root `VERSION` file, promotes `Unreleased` to a versioned heading (`scripts/promote_changelog.py`), and opens a Release PR; merging it triggers `publish-release.yml`, which creates the annotated git tag and a GitHub Release with the promoted section as notes. A `PR Title` check validates conventional-commit prefixes on pull requests.
+- The frontend header now shows a small `vX.Y` badge on every page (both authenticated and login layouts), injected at build time from the `VERSION` file and linking to this changelog.
+
 ## v3.4 — Git Settings Usability, UI Fixes & Security Hardening (2026-08-17)
 
 ### Feature — Edit a Git repo and rotate its access token in place

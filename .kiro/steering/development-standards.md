@@ -403,6 +403,7 @@ Dynamic configuration via SSM Parameter Store:
 - **Rule**: Every commit to `main` that introduces a user-visible change, infrastructure change, or security fix MUST include a corresponding changelog entry. This includes feature additions, bug fixes, security hardening, dependency updates, and breaking changes.
 - **Granularity**: One entry per logical change set (a feature branch merged = one entry). Group related sub-items as bullet points under the version header.
 - **Language**: English.
+- **Releases are automated**: entries accumulate under `## Unreleased`. To cut a release, run the **Release** workflow (Actions → Release → choose bump type + title): it bumps the root `VERSION` file, promotes `Unreleased` to a versioned heading via `scripts/promote_changelog.py`, and opens a Release PR. Merging that PR triggers `publish-release.yml`, which creates the annotated `vX.Y` git tag and a GitHub Release whose notes are the promoted section. Never hand-edit version headings or the `VERSION` file outside this flow. The frontend displays the deployed version in the header (injected from `VERSION` at build time).
 
 ### 8.5 Documentation maintenance
 

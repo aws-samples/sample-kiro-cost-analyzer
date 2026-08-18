@@ -367,6 +367,7 @@
   "nav.settings": "Configurações",
   "nav.signout": "Sair",
   "nav.users": "Todos os Usuários",
+  "nav.versionAriaLabel": "Abre o changelog no GitHub",
   "newPassword.confirmPassword": "Confirmar nova senha",
   "newPassword.confirmPasswordPlaceholder": "Confirme a nova senha",
   "newPassword.error.generic": "Erro ao definir nova senha.",

@@ -367,6 +367,7 @@
   "nav.settings": "Settings",
   "nav.signout": "Sign out",
   "nav.users": "All Users",
+  "nav.versionAriaLabel": "Opens the changelog on GitHub",
   "newPassword.confirmPassword": "Confirm new password",
   "newPassword.confirmPasswordPlaceholder": "Confirm the new password",
   "newPassword.error.generic": "Error setting new password.",
