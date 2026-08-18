@@ -58,7 +58,7 @@ export default function LoginPage() {
           <img
             src={logo}
             alt={t('brand.logoAlt')}
-            style={{ maxWidth: '100%', height: 'auto', transform: 'scale(1.5)', transformOrigin: 'center', marginBottom: 24 }}
+            style={{ maxWidth: '100%', maxHeight: 180, height: 'auto', objectFit: 'contain', marginBottom: 16 }}
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
           <Box variant="h1" textAlign="center">{t('brand.productName')}</Box>
