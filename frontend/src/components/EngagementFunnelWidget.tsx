@@ -4,6 +4,8 @@ import Alert from '@cloudscape-design/components/alert';
 import Button from '@cloudscape-design/components/button';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
+import Popover from '@cloudscape-design/components/popover';
+import SpaceBetween from '@cloudscape-design/components/space-between';
 import { useI18n } from '../i18n/useI18n';
 import { get, ApiError } from '../api/client';
 import type { EngagementResponse } from '../types';
@@ -83,7 +85,30 @@ export default function EngagementFunnelWidget({ dateParams }: EngagementFunnelW
       {data?.derivedMetrics?.churnRiskRate != null && (
         <Box margin={{ bottom: 'l' }}>
           <Box variant="awsui-key-label">
-            {t('engagement.metrics.churnRiskRate')}
+            <Popover
+              header={t('engagement.metrics.churnRiskRate')}
+              content={
+                <SpaceBetween size="xs">
+                  <Box variant="p">{t('engagement.metrics.churnRiskRate.popover.formula')}</Box>
+                  {data.derivedMetrics.idleCount != null &&
+                    data.derivedMetrics.dormantCount != null &&
+                    data.derivedMetrics.totalUsers != null && (
+                      <Box variant="p">
+                        {t('engagement.metrics.churnRiskRate.popover.counts', {
+                          idle: data.derivedMetrics.idleCount,
+                          dormant: data.derivedMetrics.dormantCount,
+                          total: data.derivedMetrics.totalUsers,
+                        })}
+                      </Box>
+                    )}
+                  <Box variant="p" color="text-body-secondary">
+                    {t('engagement.metrics.churnRiskRate.popover.threshold')}
+                  </Box>
+                </SpaceBetween>
+              }
+            >
+              {t('engagement.metrics.churnRiskRate')}
+            </Popover>
           </Box>
           <Box
             variant="awsui-value-large"

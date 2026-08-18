@@ -387,6 +387,10 @@ export interface DerivedEngagementMetrics {
   idleRate: number;
   dormantRate: number;
   churnRiskRate: number;
+  /** Raw counts for churn-risk context (optional: older cached responses omit them). */
+  idleCount?: number;
+  dormantCount?: number;
+  totalUsers?: number;
 }
 
 export interface EngagementResponse {
