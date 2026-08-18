@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+### Feature — Git settings: all-mappings view by default and token status indicator
+
+- The mappings table now shows all user-Git mappings on page load (new paginated `GET /api/git/mappings` endpoint with `limit` + opaque `lastKey` cursor), with the user selector demoted from prerequisite to optional filter and a "Load more" affordance for additional pages. Closes #12.
+- The repositories table gains an "Access Token" column (`StatusIndicator`) driven by the existing `tokenConfigured` field — no new backend call. Closes #14.
+- Together these close the Git settings usability pass. Closes #9.
+
 ### Feature — Release automation and version badge in the header
 
 - New release flow: changelog entries still accumulate under `Unreleased` (hand-written per PR), and the **Release** GitHub Actions workflow now mechanizes the rest — it bumps the new root `VERSION` file, promotes `Unreleased` to a versioned heading (`scripts/promote_changelog.py`), and opens a Release PR; merging it triggers `publish-release.yml`, which creates the annotated git tag and a GitHub Release with the promoted section as notes. A `PR Title` check validates conventional-commit prefixes on pull requests.

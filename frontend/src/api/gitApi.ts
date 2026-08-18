@@ -57,6 +57,12 @@ export function listGitMappings(userId: string): Promise<{ mappings: GitUserMapp
   return get<{ mappings: GitUserMapping[] }>(`/api/git/mappings/${userId}`);
 }
 
+/** Paginated cross-user mapping listing. Omit lastKey for the first page. */
+export function listAllGitMappings(params?: { limit?: string; lastKey?: string }):
+  Promise<{ mappings: GitUserMapping[]; lastKey?: string }> {
+  return get<{ mappings: GitUserMapping[]; lastKey?: string }>('/api/git/mappings', params);
+}
+
 export function deleteGitMapping(
   userId: string,
   provider: string,

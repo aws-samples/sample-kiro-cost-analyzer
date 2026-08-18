@@ -597,6 +597,17 @@ def _route(http_method: str, path: str, query_params: dict, body: dict, claims: 
         status_code = result.pop("_status_code", 200) if isinstance(result, dict) else 200
         return _build_response(status_code, result)
 
+    # GET /api/git/mappings — list all mappings (paginated)
+    if http_method == "GET" and path == "/api/git/mappings":
+        if not _is_admin(claims):
+            return _build_response(403, {
+                "error": "Forbidden",
+                "message": "Access restricted to administrators",
+            })
+        result = git_mapping_handler.handle_list_all_mappings(query_params)
+        status_code = result.pop("_status_code", 200) if isinstance(result, dict) else 200
+        return _build_response(status_code, result)
+
     # GET /api/git/mappings/{userId} — list mappings for user
     if http_method == "GET":
         match = _GIT_MAPPING_USER_PATTERN.match(path)

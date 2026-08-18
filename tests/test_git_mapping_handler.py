@@ -25,6 +25,7 @@ from moto import mock_aws
 from backend.handlers.git_mapping_handler import (
     handle_create_mapping,
     handle_delete_mapping,
+    handle_list_all_mappings,
     handle_list_mappings,
 )
 
@@ -192,3 +193,88 @@ class TestDeleteIdempotence:
             "provider": "gitlab",
             "deleted": True,
         }
+
+
+# ------------------------------------------------------------------
+# GET /api/git/mappings — list all mappings (paginated)
+# Feature: git-mappings-default-all-view
+# ------------------------------------------------------------------
+
+
+def _seed_mappings(ddb, count: int) -> None:
+    """Seeds `count` mappings across `count` distinct users (github)."""
+    table = ddb.Table(TABLE_NAME)
+    for i in range(count):
+        table.put_item(Item={
+            "PK": f"USER#user-{i:03d}",
+            "SK": "GITMAP#github",
+            "provider": "github",
+            "gitUsername": f"gh-user-{i:03d}",
+            "createdAt": "2026-08-01T00:00:00+00:00",
+        })
+
+
+class TestListAllMappings:
+    # Feature: git-mappings-default-all-view, Property 1: Pagination completeness
+    def test_paginating_to_exhaustion_yields_every_mapping_once(self, aws_env):
+        _seed_mappings(aws_env, 7)
+
+        seen: list[str] = []
+        params: dict = {"limit": "3"}
+        for _ in range(10):  # safety bound
+            result = handle_list_all_mappings(params, dynamodb_resource=aws_env)
+            seen.extend(m["userId"] for m in result["mappings"])
+            token = result.get("lastKey")
+            if not token:
+                break
+            params = {"limit": "3", "lastKey": token}
+
+        assert sorted(seen) == [f"user-{i:03d}" for i in range(7)]
+        assert len(seen) == len(set(seen))  # exactly once
+
+    # Feature: git-mappings-default-all-view, Property 2: Filter equivalence
+    def test_per_user_route_equals_all_view_subset(self, aws_env):
+        _seed_mappings(aws_env, 5)
+
+        all_result = handle_list_all_mappings({"limit": "100"}, dynamodb_resource=aws_env)
+        per_user = handle_list_mappings("user-002", dynamodb_resource=aws_env)
+
+        subset = [m for m in all_result["mappings"] if m["userId"] == "user-002"]
+        assert subset == per_user["mappings"]
+
+    # Feature: git-mappings-default-all-view, Property 3: Limit bound
+    def test_returned_count_never_exceeds_limit(self, aws_env):
+        _seed_mappings(aws_env, 10)
+
+        for limit in ("1", "4", "10", "100"):
+            result = handle_list_all_mappings({"limit": limit}, dynamodb_resource=aws_env)
+            assert len(result["mappings"]) <= min(int(limit), 100)
+
+    def test_limit_clamped_to_bounds(self, aws_env):
+        _seed_mappings(aws_env, 3)
+        # limit=0 clamps to 1; limit=999 clamps to 100
+        result = handle_list_all_mappings({"limit": "0"}, dynamodb_resource=aws_env)
+        assert len(result["mappings"]) == 1
+        result = handle_list_all_mappings({"limit": "999"}, dynamodb_resource=aws_env)
+        assert len(result["mappings"]) == 3
+
+    def test_empty_table_returns_empty_without_token(self, aws_env):
+        result = handle_list_all_mappings({}, dynamodb_resource=aws_env)
+        assert result["mappings"] == []
+        assert "lastKey" not in result
+
+    def test_malformed_last_key_returns_400(self, aws_env):
+        result = handle_list_all_mappings(
+            {"lastKey": "not-base64!!!"}, dynamodb_resource=aws_env,
+        )
+        assert result["_status_code"] == 400
+        assert result["error"] == "ValidationError"
+
+    def test_non_mapping_items_excluded(self, aws_env):
+        _seed_mappings(aws_env, 2)
+        # Seed a non-mapping item that must not appear
+        aws_env.Table(TABLE_NAME).put_item(Item={
+            "PK": "GITREPO#abc", "SK": "CONFIG", "name": "repo",
+        })
+        result = handle_list_all_mappings({"limit": "100"}, dynamodb_resource=aws_env)
+        assert len(result["mappings"]) == 2

@@ -280,6 +280,59 @@ class GitRepository:
             }
         )
 
+    def list_all_mappings(
+        self, limit: int = 50, last_key: dict | None = None
+    ) -> tuple[list[dict], dict | None]:
+        """Paginated cross-user listing of all Git mappings.
+
+        Scans the table for ``GITMAP#`` items, looping internal scan pages
+        until ``limit`` matching items are gathered or the table is
+        exhausted (DynamoDB applies ``Limit`` before the filter, so a
+        single scan page can return fewer matches than requested).
+
+        Note:
+            Full-table scan with filter — same acceptable-scale trade-off
+            as ``list_repo_configs`` (documented for < ~100s of items). A
+            GSI can replace this later without changing the API shape.
+
+        Args:
+            limit: Maximum number of mappings to return.
+            last_key: DynamoDB ``ExclusiveStartKey`` from a prior page.
+
+        Returns:
+            Tuple of (mapping items, ``LastEvaluatedKey`` or None when the
+            table is exhausted).
+        """
+        items: list[dict] = []
+        kwargs: dict = {
+            "FilterExpression": Attr("SK").begins_with("GITMAP#"),
+        }
+        if last_key:
+            kwargs["ExclusiveStartKey"] = last_key
+
+        next_key: dict | None = None
+        truncated_mid_page = False
+        while True:
+            response = self._table.scan(**kwargs)
+            for item in response.get("Items", []):
+                if len(items) >= limit:
+                    truncated_mid_page = True
+                    break
+                items.append(item)
+            next_key = response.get("LastEvaluatedKey")
+            if truncated_mid_page or len(items) >= limit or not next_key:
+                break
+            kwargs["ExclusiveStartKey"] = next_key
+
+        if items and (truncated_mid_page or next_key):
+            # Resume from the last item actually returned, not the scan
+            # page boundary — a mid-page cut would otherwise skip items.
+            next_key = {"PK": items[-1]["PK"], "SK": items[-1]["SK"]}
+        elif not truncated_mid_page and not next_key:
+            next_key = None
+
+        return self._convert_decimals(items), next_key
+
     def get_all_mappings_for_provider(self, provider: str) -> list[dict]:
         """Retrieve all user-Git mappings for a given provider.
 

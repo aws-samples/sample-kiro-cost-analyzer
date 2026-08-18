@@ -37,12 +37,15 @@ vi.mock('../../auth/useAuth', () => ({
 const listGitReposMock = vi.fn();
 const listGitMappingsMock = vi.fn();
 const deleteGitMappingMock = vi.fn();
+const listAllGitMappingsMock = vi.fn();
 
 vi.mock('../../api/gitApi', () => ({
   listGitRepos: (...args: unknown[]) => listGitReposMock(...args),
   createGitRepo: vi.fn(),
+  updateGitRepo: vi.fn(),
   deleteGitRepo: vi.fn(),
   listGitMappings: (...args: unknown[]) => listGitMappingsMock(...args),
+  listAllGitMappings: (...args: unknown[]) => listAllGitMappingsMock(...args),
   createGitMapping: vi.fn(),
   deleteGitMapping: (...args: unknown[]) => deleteGitMappingMock(...args),
 }));
@@ -162,6 +165,7 @@ async function cancelMappingDeletion(): Promise<void> {
 beforeEach(() => {
   vi.clearAllMocks();
   listGitReposMock.mockResolvedValue({ repositories: [] });
+  listAllGitMappingsMock.mockResolvedValue({ mappings: [] });
   listGitMappingsMock.mockResolvedValue({
     mappings: [MAPPING_ROW_GITHUB, MAPPING_ROW_GITLAB],
   });
@@ -359,5 +363,61 @@ describe('GitSettingsPage — delete confirmation modal (Feature: git-settings-d
     expect(screen.getAllByText(MAPPING_ROW_GITLAB.gitUsername).length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText(MAPPING_ROW_GITLAB.userId).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(modalWarning)).toBeInTheDocument();
+  });
+});
+
+describe('GitSettingsPage — default all-mappings view (Feature: git-mappings-default-all-view)', () => {
+  it('fetches the all-users view on page load with no user selected', async () => {
+    await setLocaleFor('en');
+    listAllGitMappingsMock.mockResolvedValue({
+      mappings: [MAPPING_ROW_GITHUB, MAPPING_ROW_GITLAB],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(listAllGitMappingsMock).toHaveBeenCalled();
+    });
+
+    // Rows render without any user pre-selected (Req 2.1)
+    await screen.findByText(MAPPING_ROW_GITHUB.gitUsername);
+    await screen.findByText(MAPPING_ROW_GITLAB.gitUsername);
+    expect(listGitMappingsMock).not.toHaveBeenCalled();
+  });
+
+  it('shows Load more only when a pagination token is returned', async () => {
+    await setLocaleFor('en');
+    listAllGitMappingsMock.mockResolvedValue({
+      mappings: [MAPPING_ROW_GITHUB],
+      lastKey: 'opaque-token',
+    });
+
+    renderPage();
+
+    await screen.findByText(MAPPING_ROW_GITHUB.gitUsername);
+    const loadMore = await screen.findByRole('button', {
+      name: i18n.t('gitSettings.mappings.loadMore'),
+    });
+    expect(loadMore).toBeInTheDocument();
+  });
+
+  it('switches to the per-user route when a user is selected (Req 2.3)', async () => {
+    await setLocaleFor('en');
+    listAllGitMappingsMock.mockResolvedValue({ mappings: [] });
+    listGitMappingsMock.mockResolvedValue({
+      mappings: [MAPPING_ROW_GITHUB, MAPPING_ROW_GITLAB],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(listAllGitMappingsMock).toHaveBeenCalled();
+    });
+
+    await selectTheSeededMappingUser('Target User');
+
+    await waitFor(() => {
+      expect(listGitMappingsMock).toHaveBeenCalledWith(TARGET_USER_ID);
+    });
   });
 });

@@ -1839,6 +1839,12 @@ Resources:
             RestApiId: !Ref ApiGateway
             Path: /api/git/mappings
             Method: POST
+        GitMappingsListAll:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/git/mappings
+            Method: GET
         GitMappingsGet:
           Type: Api
           Properties:
