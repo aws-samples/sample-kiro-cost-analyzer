@@ -7,6 +7,7 @@ import Box from '@cloudscape-design/components/box';
 import Alert from '@cloudscape-design/components/alert';
 import Modal from '@cloudscape-design/components/modal';
 import Select, { type SelectProps } from '@cloudscape-design/components/select';
+import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import FormField from '@cloudscape-design/components/form-field';
 import GitRepoForm from '../components/GitRepoForm';
 import GitMappingForm from '../components/GitMappingForm';
@@ -19,6 +20,7 @@ import {
   updateGitRepo,
   deleteGitRepo,
   listGitMappings,
+  listAllGitMappings,
   createGitMapping,
   deleteGitMapping,
   type GitRepoPatch,
@@ -45,6 +47,7 @@ export default function GitSettingsPage() {
   const [mappingSuccess, setMappingSuccess] = useState<string | null>(null);
   const [mappingDeleteTarget, setMappingDeleteTarget] = useState<GitUserMapping | null>(null);
   const [deletingMapping, setDeletingMapping] = useState(false);
+  const [mappingsLastKey, setMappingsLastKey] = useState<string | null>(null);
 
   const [userOptions, setUserOptions] = useState<SelectProps.Option[]>([]);
   const [selectedMappingUser, setSelectedMappingUser] = useState<SelectProps.Option | null>(null);
@@ -91,12 +94,31 @@ export default function GitSettingsPage() {
     }
   }, [t]);
 
+  /**
+   * Cross-user default view (issue #12). `reset` replaces the list (page
+   * load / filter cleared); otherwise appends the next page (Load more).
+   */
+  const fetchAllMappings = useCallback(async (reset: boolean, lastKey?: string) => {
+    setMappingsLoading(true);
+    setMappingError(null);
+    try {
+      const resp = await listAllGitMappings(lastKey ? { lastKey } : undefined);
+      setMappings((prev) => (reset ? resp.mappings ?? [] : [...prev, ...(resp.mappings ?? [])]));
+      setMappingsLastKey(resp.lastKey ?? null);
+    } catch (err) {
+      setMappingError(err instanceof Error ? err.message : t('gitSettings.mappings.error.load'));
+    } finally {
+      setMappingsLoading(false);
+    }
+  }, [t]);
+
   useEffect(() => {
     if (isAdmin) {
       fetchRepos();
       fetchUsers();
+      fetchAllMappings(true);
     }
-  }, [isAdmin, fetchRepos, fetchUsers]);
+  }, [isAdmin, fetchRepos, fetchUsers, fetchAllMappings]);
 
   async function handleCreateRepo(data: { name: string; url: string; provider: string; accessToken: string }) {
     await createGitRepo(data);
@@ -149,6 +171,7 @@ export default function GitSettingsPage() {
       await deleteGitMapping(mappingDeleteTarget.userId, mappingDeleteTarget.provider);
       setMappingSuccess(t('gitSettings.mappings.success.removed'));
       if (selectedMappingUser?.value) fetchMappings(selectedMappingUser.value);
+      else fetchAllMappings(true);
     } catch (err) {
       setMappingError(err instanceof Error ? err.message : t('gitSettings.mappings.error.delete'));
     } finally {
@@ -195,6 +218,16 @@ export default function GitSettingsPage() {
             { id: 'url',      header: t('gitSettings.repos.header.url'),      cell: (item) => item.url,                                     width: 400 },
             { id: 'provider', header: t('gitSettings.repos.header.provider'), cell: (item) => item.provider,                                width: 120 },
             {
+              id: 'token',
+              header: t('gitSettings.repos.header.token'),
+              cell: (item) => (
+                <StatusIndicator type={item.tokenConfigured ? 'success' : 'warning'}>
+                  {t(item.tokenConfigured ? 'gitSettings.repos.token.configured' : 'gitSettings.repos.token.missing')}
+                </StatusIndicator>
+              ),
+              width: 150,
+            },
+            {
               id: 'actions',
               header: t('gitSettings.repos.header.actions'),
               cell: (item) => (
@@ -230,11 +263,12 @@ export default function GitSettingsPage() {
                 onChange={({ detail }) => {
                   const opt = detail.selectedOption;
                   setSelectedMappingUser(opt?.value ? opt : null);
+                  setMappingsLastKey(null);
                   if (opt?.value) fetchMappings(opt.value);
-                  else setMappings([]);
+                  else fetchAllMappings(true);
                 }}
                 options={[
-                  { value: '', label: t('gitSettings.mappings.userSelector.placeholder') },
+                  { value: '', label: t('gitSettings.mappings.userSelector.all') },
                   ...userOptions,
                 ]}
                 placeholder={t('gitSettings.mappings.userSelector.placeholder')}
@@ -252,12 +286,32 @@ export default function GitSettingsPage() {
                 <Box variant="p" color="inherit">
                   {selectedMappingUser?.value
                     ? t('gitSettings.mappings.empty.prompt')
-                    : t('gitSettings.mappings.empty.selectUser')}
+                    : t('gitSettings.mappings.empty.noneAnywhere')}
                 </Box>
               </Box>
             }
+            footer={
+              !selectedMappingUser?.value && mappingsLastKey ? (
+                <Box textAlign="center">
+                  <Button
+                    onClick={() => fetchAllMappings(false, mappingsLastKey)}
+                    loading={mappingsLoading}
+                  >
+                    {t('gitSettings.mappings.loadMore')}
+                  </Button>
+                </Box>
+              ) : undefined
+            }
             columnDefinitions={[
-              { id: 'userId',      header: t('gitSettings.mappings.header.userId'),      cell: (item) => item.userId,      width: 200 },
+              {
+                id: 'userId',
+                header: t('gitSettings.mappings.header.userId'),
+                // Resolve the display name from the already-loaded user
+                // options; fall back to the raw userId when unknown
+                // (issue #18 F3: avoid raw UUIDs as the primary identifier).
+                cell: (item) => userOptions.find((o) => o.value === item.userId)?.label ?? item.userId,
+                width: 200,
+              },
               { id: 'provider',    header: t('gitSettings.mappings.header.provider'),    cell: (item) => item.provider,    width: 120 },
               { id: 'gitUsername', header: t('gitSettings.mappings.header.gitUsername'), cell: (item) => item.gitUsername, width: 180 },
               { id: 'createdAt',   header: t('gitSettings.mappings.header.createdAt'),   cell: (item) => item.createdAt ? formatDateTime(item.createdAt) : '—', width: 180 },

@@ -225,3 +225,70 @@ def handle_delete_mapping(
         "provider": provider,
         "deleted": True,
     }
+
+
+def handle_list_all_mappings(
+    query_params: dict,
+    dynamodb_resource=None,
+) -> dict:
+    """Handle GET /api/git/mappings — paginated cross-user mapping listing.
+
+    Args:
+        query_params: Query string parameters. Supports ``limit`` (default
+            50, clamped to [1, 100]) and ``lastKey`` (opaque base64 token
+            from a prior response).
+        dynamodb_resource: Optional boto3 DynamoDB resource (for testing).
+
+    Returns:
+        Dict with ``mappings`` list and, when more results exist, an opaque
+        ``lastKey`` pagination token. Malformed tokens return a 400 error
+        dict.
+    """
+    import base64
+    import json as _json
+
+    params = query_params or {}
+
+    try:
+        limit = int(params.get("limit", 50))
+    except (TypeError, ValueError):
+        limit = 50
+    limit = max(1, min(limit, 100))
+
+    last_key = None
+    token = params.get("lastKey")
+    if token:
+        try:
+            last_key = _json.loads(base64.b64decode(token).decode("utf-8"))
+            if not isinstance(last_key, dict) or "PK" not in last_key or "SK" not in last_key:
+                raise ValueError("token missing key fields")
+        except Exception:
+            return {
+                "error": "ValidationError",
+                "message": "Invalid lastKey pagination token.",
+                "_status_code": 400,
+            }
+
+    table_name = os.environ.get("ANALYTICS_TABLE", "Analytics_Table")
+    repo = GitRepository(table_name, dynamodb_resource=dynamodb_resource)
+
+    items, next_key = repo.list_all_mappings(limit=limit, last_key=last_key)
+
+    mappings = []
+    for item in items:
+        pk = item.get("PK", "")
+        mappings.append({
+            "userId": pk.replace("USER#", "") if pk.startswith("USER#") else "",
+            "provider": item.get("provider", ""),
+            "gitUsername": item.get("gitUsername", ""),
+            "createdAt": item.get("createdAt", ""),
+        })
+
+    result: dict = {"mappings": mappings}
+    if next_key:
+        result["lastKey"] = base64.b64encode(
+            _json.dumps({"PK": next_key["PK"], "SK": next_key["SK"]}).encode("utf-8")
+        ).decode("ascii")
+
+    logger.info("Listed all git mappings", count=len(mappings), hasMore=bool(next_key))
+    return result
