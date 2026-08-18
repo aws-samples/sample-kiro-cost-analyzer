@@ -380,7 +380,7 @@ export default function GitSettingsPage() {
             <Alert type="warning">{t('gitSettings.mappings.deleteModal.warning')}</Alert>
             <Box>
               {t('gitSettings.mappings.deleteModal.confirm')}{' '}
-              <strong>{mappingDeleteTarget?.userId}</strong> → <strong>{mappingDeleteTarget?.gitUsername}</strong> (<strong>{mappingDeleteTarget?.provider}</strong>)?
+              <strong>{userOptions.find((o) => o.value === mappingDeleteTarget?.userId)?.label ?? t('common.unidentifiedUser', { id: mappingDeleteTarget?.userId.slice(0, 8) ?? '' })}</strong> → <strong>{mappingDeleteTarget?.gitUsername}</strong> (<strong>{mappingDeleteTarget?.provider}</strong>)?
             </Box>
           </SpaceBetween>
         </Modal>

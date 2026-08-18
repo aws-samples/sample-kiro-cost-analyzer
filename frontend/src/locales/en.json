@@ -48,6 +48,7 @@
   "common.loading.chart": "Loading chart...",
   "common.refresh": "Refresh",
   "common.retry": "Try again",
+  "common.unidentifiedUser": "Unidentified user ({{id}}…)",
   "cron.cron.daily": "Every day at {{time}}",
   "cron.cron.dayOfMonth": "Every day {{day}} at {{time}}",
   "cron.cron.daysList": "{{days}} at {{time}}",

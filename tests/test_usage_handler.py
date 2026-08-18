@@ -495,3 +495,52 @@ class TestTierResolution:
 
         user = result["users"][0]
         assert "_latestTierDate" not in user
+
+
+# ------------------------------------------------------------------
+# Feature: human-readable-user-identifiers
+# ------------------------------------------------------------------
+
+
+class TestUserMetadataDisplayNameFallback:
+    """Feature: human-readable-user-identifiers, Property 1: Non-empty
+    display name with userName present."""
+
+    @mock_aws
+    def test_display_name_falls_back_to_user_name(self):
+        from backend.handlers.usage_handler import _lookup_user_metadata
+
+        os.environ["USER_NAMES_TABLE"] = "TestUserNames"
+        client = boto3.client("dynamodb", region_name="us-east-1")
+        client.create_table(
+            TableName="TestUserNames",
+            KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
+            AttributeDefinitions=[{"AttributeName": "userId", "AttributeType": "S"}],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        # Unresolved in Identity Center: displayName empty, userName present
+        client.put_item(TableName="TestUserNames", Item={
+            "userId": {"S": "u-unresolved"},
+            "displayName": {"S": ""},
+            "userName": {"S": "jdoe"},
+        })
+        # Resolved: displayName present (must win over userName)
+        client.put_item(TableName="TestUserNames", Item={
+            "userId": {"S": "u-resolved"},
+            "displayName": {"S": "Jane Doe"},
+            "userName": {"S": "jdoe2"},
+        })
+        # Neither name available
+        client.put_item(TableName="TestUserNames", Item={
+            "userId": {"S": "u-empty"},
+            "displayName": {"S": ""},
+            "userName": {"S": ""},
+        })
+
+        result = _lookup_user_metadata(
+            ["u-unresolved", "u-resolved", "u-empty"], dynamodb_client=client,
+        )
+
+        assert result["u-unresolved"]["displayName"] == "jdoe"  # fallback applied
+        assert result["u-resolved"]["displayName"] == "Jane Doe"  # unchanged
+        assert result["u-empty"]["displayName"] == ""  # Req 1.3: may stay empty

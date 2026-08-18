@@ -47,9 +47,14 @@ def _lookup_user_metadata(user_ids: list[str], dynamodb_client=None) -> dict[str
                 Key={"userId": {"S": uid}},
             )
             item = resp.get("Item", {})
+            display_name = item.get("displayName", {}).get("S", "")
+            user_name = item.get("userName", {}).get("S", "")
             result[uid] = {
-                "displayName": item.get("displayName", {}).get("S", ""),
-                "userName": item.get("userName", {}).get("S", ""),
+                # Fall back to userName when Identity Center did not resolve
+                # a display name, so consumers never render a raw UUID as
+                # the primary identifier (issue #18 / F3).
+                "displayName": display_name or user_name,
+                "userName": user_name,
                 "status": item.get("status", {}).get("S", "ACTIVE") or "ACTIVE",
                 "tombstonedAt": item.get("tombstonedAt", {}).get("S") or None,
             }

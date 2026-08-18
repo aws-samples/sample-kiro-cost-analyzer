@@ -361,7 +361,9 @@ describe('GitSettingsPage — delete confirmation modal (Feature: git-settings-d
     // Modal body identifies the exact target (Req 2.2). The gitUsername
     // appears both in the table row and in the modal, so assert at least 2.
     expect(screen.getAllByText(MAPPING_ROW_GITLAB.gitUsername).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText(MAPPING_ROW_GITLAB.userId).length).toBeGreaterThanOrEqual(1);
+    // The modal resolves the display name from the loaded user options
+    // (issue #18): 'Target User' appears instead of the raw userId.
+    expect(screen.getAllByText('Target User').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(modalWarning)).toBeInTheDocument();
   });
 });

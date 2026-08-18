@@ -48,6 +48,7 @@
   "common.loading.chart": "Carregando gráfico...",
   "common.refresh": "Atualizar",
   "common.retry": "Tentar novamente",
+  "common.unidentifiedUser": "Usuário não identificado ({{id}}…)",
   "cron.cron.daily": "Todos os dias às {{time}}",
   "cron.cron.dayOfMonth": "Todo dia {{day}} às {{time}}",
   "cron.cron.daysList": "{{days}} às {{time}}",
