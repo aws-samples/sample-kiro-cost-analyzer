@@ -303,7 +303,15 @@ export default function GitSettingsPage() {
               ) : undefined
             }
             columnDefinitions={[
-              { id: 'userId',      header: t('gitSettings.mappings.header.userId'),      cell: (item) => item.userId,      width: 200 },
+              {
+                id: 'userId',
+                header: t('gitSettings.mappings.header.userId'),
+                // Resolve the display name from the already-loaded user
+                // options; fall back to the raw userId when unknown
+                // (issue #18 F3: avoid raw UUIDs as the primary identifier).
+                cell: (item) => userOptions.find((o) => o.value === item.userId)?.label ?? item.userId,
+                width: 200,
+              },
               { id: 'provider',    header: t('gitSettings.mappings.header.provider'),    cell: (item) => item.provider,    width: 120 },
               { id: 'gitUsername', header: t('gitSettings.mappings.header.gitUsername'), cell: (item) => item.gitUsername, width: 180 },
               { id: 'createdAt',   header: t('gitSettings.mappings.header.createdAt'),   cell: (item) => item.createdAt ? formatDateTime(item.createdAt) : '—', width: 180 },
