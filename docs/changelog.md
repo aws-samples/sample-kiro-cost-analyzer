@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+### Feature — Design critique completion: navigation clarity, tab hierarchy, churn-risk context
+
+- The sidebar section previously labeled "Users" is now "Analytics", removing the collision with the Dashboard "Users" tab (two different screens shared one label). Closes #16.
+- The inner Settings tabs in Administration now use the Cloudscape `container` variant, visually distinguishing the two tab levels. Closes #19.
+- The Churn Risk metric gains a popover explaining the formula, the raw counts behind the percentage (idle + dormant of total — now included in the funnel response), and the >50% high-risk threshold, making the number interpretable in small populations. Closes #24.
+- These close the final open findings of the Design Critique heuristic evaluation. Closes #15.
+
 ### Feature — UX quick wins: productivity ranking, login fold, settings gear label
 
 - The Productivity page now shows a top-10 "most active users" ranking (by total credits, using the already-fetched usage data) instead of an empty state; rows link to each user's productivity analysis. Closes #17.

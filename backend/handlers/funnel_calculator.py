@@ -107,6 +107,9 @@ def compute_derived_metrics(
             "idleRate": 0.0,
             "dormantRate": 0.0,
             "churnRiskRate": 0.0,
+            "idleCount": 0,
+            "dormantCount": 0,
+            "totalUsers": 0,
         }
 
     power_count = sum(1 for cat in classifications.values() if cat == "power")
@@ -126,4 +129,9 @@ def compute_derived_metrics(
         "idleRate": idle_rate,
         "dormantRate": dormant_rate,
         "churnRiskRate": churn_risk_rate,
+        # Raw counts give the churn-risk percentage interpretable context
+        # in small populations (issue #24 / design critique F9).
+        "idleCount": idle_count,
+        "dormantCount": dormant_count,
+        "totalUsers": total_users,
     }

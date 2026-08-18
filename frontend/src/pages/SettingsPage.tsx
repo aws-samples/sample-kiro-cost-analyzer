@@ -384,7 +384,9 @@ export default function SettingsPage() {
           <SkeletonLoader variant="container" />
         </SpaceBetween>
       ) : (
-        <Tabs tabs={configTabs} />
+        // Container variant differentiates this inner tab level from the
+        // outer AdminPage tabs (design critique F4 / issue #19).
+        <Tabs variant="container" tabs={configTabs} />
       )}
     </SpaceBetween>
   );

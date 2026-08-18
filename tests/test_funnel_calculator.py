@@ -208,3 +208,39 @@ class TestDerivedMetricsConsistency:
             assert abs(value * 10 - round(value * 10)) < 1e-9, (
                 f"{key}={value} is not rounded to 1 decimal place"
             )
+
+
+class TestChurnRiskCountConsistency:
+    """Feature: design-critique-final, Property 1: Count consistency.
+
+    The raw counts added for issue #24 must always agree with the
+    churnRiskRate percentage computed from them.
+    """
+
+    @given(
+        categories=st.lists(
+            st.sampled_from(["power", "regular", "light", "idle", "dormant"]),
+            min_size=1,
+            max_size=200,
+        )
+    )
+    @settings(max_examples=100)
+    def test_rate_matches_counts(self, categories):
+        classifications = {f"u{i}": cat for i, cat in enumerate(categories)}
+        total = len(categories)
+
+        metrics = compute_derived_metrics(total, classifications)
+
+        assert metrics["totalUsers"] == total
+        assert metrics["idleCount"] == sum(1 for c in categories if c == "idle")
+        assert metrics["dormantCount"] == sum(1 for c in categories if c == "dormant")
+        expected_rate = round(
+            (metrics["idleCount"] + metrics["dormantCount"]) / total * 100, 1
+        )
+        assert metrics["churnRiskRate"] == expected_rate
+
+    def test_zero_users_returns_zero_counts(self):
+        metrics = compute_derived_metrics(0, {})
+        assert metrics["idleCount"] == 0
+        assert metrics["dormantCount"] == 0
+        assert metrics["totalUsers"] == 0
