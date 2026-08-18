@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## v3.6 — Design Critique Completion (2026-08-18)
+
 ### Feature — Design critique completion: navigation clarity, tab hierarchy, churn-risk context
 
 - The sidebar section previously labeled "Users" is now "Analytics", removing the collision with the Dashboard "Users" tab (two different screens shared one label). Closes #16.
