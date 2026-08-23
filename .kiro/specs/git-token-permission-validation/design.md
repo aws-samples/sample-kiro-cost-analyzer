@@ -61,13 +61,15 @@ REQUIRED_PERMISSION = {
     },
     "gitlab": {
         CHECK_REPO_ACCESS: "read_api",
-        CHECK_COMMITS: "read_api",
+        CHECK_COMMITS: "read_repository",
         CHECK_PULL_REQUESTS: "read_api",
     },
 }
 ```
 
-GitLab collapses to a single scope because `read_api` is what actually gates all three; reporting three copies of it would imply three separate switches in the GitLab UI that do not exist. The response de-duplicates while preserving first-seen order.
+GitLab is mapped per-endpoint, not collapsed. This design originally assumed `read_api` gated all three operations and reported a single scope for any GitLab failure. A live probe with a deliberately restricted token disproved it: the token returned **200 on merge_requests** — so `read_api` was present — while returning **403 on commits**, because repository content is gated by `read_repository`, which `read_api` does not include. Collapsing would have told the user to grant a scope they already had, which is exactly the misdirection this feature exists to eliminate. The response still de-duplicates, so `read_api` appears once even though two checks map to it.
+
+That same probe returned 403 on the project-metadata read while merge requests succeeded, which scopes alone do not explain — GitLab authorizes on scope **and** project role, and a Guest cannot read repository content. The remediation text therefore names the role floor (Reporter) alongside the scopes rather than pretending scopes are the whole story.
 
 ## Status mapping
 

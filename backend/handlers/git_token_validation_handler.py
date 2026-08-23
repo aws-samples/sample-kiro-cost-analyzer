@@ -69,9 +69,14 @@ CHECK_ORDER: tuple[str, ...] = (
 
 # Stable permission identifiers surfaced for a failing check. These are
 # machine identifiers, not prose: the frontend renders them with each
-# provider's own naming. GitLab collapses to a single scope because
-# ``read_api`` is what actually gates all three operations — reporting it
-# three times would imply three switches that do not exist in its UI.
+# provider's own naming.
+#
+# GitLab is mapped per-endpoint rather than collapsed to a single scope.
+# An earlier revision assumed `read_api` gated all three operations; a live
+# probe with a restricted token disproved that — it returned 200 on
+# merge_requests (so `read_api` was present) while returning 403 on
+# commits, because repository CONTENT is gated by `read_repository`, which
+# `read_api` does not include.
 REQUIRED_PERMISSION: dict[str, dict[str, str]] = {
     "github": {
         CHECK_REPO_ACCESS: "metadata:read",
@@ -80,7 +85,7 @@ REQUIRED_PERMISSION: dict[str, dict[str, str]] = {
     },
     "gitlab": {
         CHECK_REPO_ACCESS: "read_api",
-        CHECK_COMMITS: "read_api",
+        CHECK_COMMITS: "read_repository",
         CHECK_PULL_REQUESTS: "read_api",
     },
 }

@@ -227,8 +227,32 @@ class TestVerdicts:
             "pull_requests": "ok",
         }
 
-    def test_gitlab_deduplicates_its_single_scope(self, public_dns):
+    def test_gitlab_maps_commits_to_read_repository_not_read_api(self, public_dns):
+        """`read_api` does not cover repository content — a live probe returned
+        200 on merge_requests while 403 on commits, so the two must map to
+        different scopes or the remediation misdirects the user."""
         fake = _FakeRequests([403, 403, 403])
+        result = handler.handle_validate_token(_gitlab_body(), requests_module=fake)
+
+        assert result["requiredPermissions"] == ["read_api", "read_repository"]
+
+    def test_gitlab_live_observed_shape(self, public_dns):
+        """The exact shape a restricted GitLab token produced in production:
+        project metadata and commits refused, merge requests allowed."""
+        fake = _FakeRequests([403, 403, 200])
+        result = handler.handle_validate_token(_gitlab_body(), requests_module=fake)
+
+        assert result["overall"] == "partial"
+        assert _statuses(result) == {
+            "repo_access": "forbidden",
+            "commits": "forbidden",
+            "pull_requests": "ok",
+        }
+        assert result["requiredPermissions"] == ["read_api", "read_repository"]
+
+    def test_gitlab_deduplicates_repeated_scopes(self, public_dns):
+        """read_api backs two checks; it must still appear once."""
+        fake = _FakeRequests([403, 200, 403])
         result = handler.handle_validate_token(_gitlab_body(), requests_module=fake)
 
         assert result["requiredPermissions"] == ["read_api"]
