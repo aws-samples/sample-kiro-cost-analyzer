@@ -116,6 +116,7 @@ class TestWritePromptRecord:
             "responseLength": 200,
             "prompt": "hello",
             "response": "world",
+            "contentInS3": False,
         }
         items = _write_prompt_record(writer, record, StructuredLogger("test"))
 
@@ -171,6 +172,7 @@ class TestWritePromptRecord:
             "triggerType": "",
             "prompt": "hi",
             "response": "hey",
+            "contentInS3": False,
         }
         items = _write_prompt_record(writer, record, StructuredLogger("test"))
 
@@ -191,6 +193,7 @@ class TestWritePromptRecord:
             "triggerType": "",
             "prompt": "q",
             "response": "a",
+            "contentInS3": False,
         }
         _write_prompt_record(writer, record, StructuredLogger("test"))
 
@@ -198,6 +201,35 @@ class TestWritePromptRecord:
             Key={"PK": "USER#user-3", "SK": "STATS#DAILY#2025-02-20"}
         )["Item"]
         assert daily["totalInteractions"] == 1
+
+    def test_prompt_missing_content_in_s3_key_defaults_to_inline(self, aws_env, table):
+        """A record from an in-flight Map child still running the previous
+        Parse output (deploy window) never set contentInS3 — it must default
+        to False and write inline, matching that output's actual content."""
+        from shared.analytics_writer import AnalyticsWriter
+
+        dynamodb, s3 = aws_env
+        writer = AnalyticsWriter(TABLE_NAME, DATA_BUCKET, dynamodb_resource=dynamodb, s3_client=s3)
+
+        record = {
+            "userId": "user-4",
+            "timestamp": "2025-01-15T12:00:00Z",
+            "requestId": "req-004",
+            "date": "2025-01-15",
+            "modelId": "",
+            "triggerType": "",
+            "prompt": "legacy prompt",
+            "response": "legacy response",
+            # contentInS3 deliberately absent
+        }
+        _write_prompt_record(writer, record, StructuredLogger("test"))
+
+        prompt_item = table.get_item(
+            Key={"PK": "USER#user-4", "SK": "PROMPT#2025-01-15T12:00:00Z#req-004"}
+        )["Item"]
+        assert prompt_item["contentInS3"] is False
+        assert prompt_item["prompt"] == "legacy prompt"
+        assert prompt_item["response"] == "legacy response"
 
 
 # ------------------------------------------------------------------
@@ -287,6 +319,7 @@ class TestWriterHandlerPrompt:
                         "triggerType": "CHAT",
                         "prompt": "hello",
                         "response": "world",
+                        "contentInS3": False,
                     },
                 ],
                 "fileType": "prompt",

@@ -999,6 +999,7 @@ Resources:
           SSM_SOURCE_BUCKET_ROLE_ARN: /kiro-cost-analyzer/source-bucket-role-arn
           SSM_IDENTITY_STORE_ROLE_ARN: /kiro-cost-analyzer/identity-store-role-arn
           USER_NAMES_TABLE: !Ref UserNamesTable
+          DATA_BUCKET: !Ref DataBucket
       Policies:
         - Statement:
             - Sid: ReadSourceBucket
@@ -1007,6 +1008,12 @@ Resources:
                 - s3:GetObject
               Resource:
                 - !Sub "arn:aws:s3:::${SourceBucketName}/*"
+            - Sid: WriteDataBucket
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                - !Sub "arn:aws:s3:::${DataBucket}/*"
             - Sid: KMSDecrypt
               Effect: Allow
               Action:

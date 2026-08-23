@@ -64,7 +64,7 @@ class TestWritePromptInline:
             "promptLength": 10,
             "responseLength": 20,
         }
-        writer.write_prompt("user-1", record, "hello", "world")
+        writer.write_prompt("user-1", record, "hello", "world", content_in_s3=False)
 
         item = table.get_item(
             Key={"PK": "USER#user-1", "SK": "PROMPT#2025-01-15T14:30:25Z#req-001"}
@@ -77,13 +77,13 @@ class TestWritePromptInline:
         assert item["modelId"] == "claude-sonnet"
 
     def test_inline_boundary_exactly_4096(self, writer, table):
-        """Content exactly at 4096 bytes should be stored inline."""
+        """Content exactly at 4096 bytes, caller decides inline (contentInS3=False)."""
         # 4096 bytes total: 2048 + 2048
         prompt = "a" * 2048
         response = "b" * 2048
         record = {"requestId": "req-boundary", "timestamp": "2025-01-15T00:00:00Z"}
 
-        writer.write_prompt("user-1", record, prompt, response)
+        writer.write_prompt("user-1", record, prompt, response, content_in_s3=False)
 
         item = table.get_item(
             Key={"PK": "USER#user-1", "SK": "PROMPT#2025-01-15T00:00:00Z#req-boundary"}
@@ -99,13 +99,17 @@ class TestWritePromptInline:
 # ------------------------------------------------------------------
 
 class TestWritePromptS3:
-    def test_large_content_stored_in_s3(self, writer, table, aws_resources):
+    def test_content_in_s3_true_does_not_write_s3_again(self, writer, table, aws_resources):
+        """When the caller has already decided content_in_s3=True (Parse already
+        wrote the object), write_prompt must record the flag but NOT re-upload —
+        the object is assumed to already exist at prompts-content/{requestId}.json."""
         _, s3 = aws_resources
-        prompt = "x" * 3000
-        response = "y" * 2000  # 5000 bytes > 4096
         record = {"requestId": "req-large", "timestamp": "2025-01-15T10:00:00Z"}
 
-        writer.write_prompt("user-1", record, prompt, response)
+        # Content strings are irrelevant here — Parse would have already
+        # cleared them to "" before Writer ever sees the record — but pass
+        # non-empty values to prove they are NOT persisted anywhere by Writer.
+        writer.write_prompt("user-1", record, "", "", content_in_s3=True)
 
         item = table.get_item(
             Key={"PK": "USER#user-1", "SK": "PROMPT#2025-01-15T10:00:00Z#req-large"}
@@ -115,11 +119,27 @@ class TestWritePromptS3:
         assert "prompt" not in item
         assert "response" not in item
 
-        # Verify S3 content
-        obj = s3.get_object(Bucket=DATA_BUCKET, Key="prompts-content/req-large.json")
-        body = json.loads(obj["Body"].read())
-        assert body["prompt"] == prompt
-        assert body["response"] == response
+        # No object was written by Writer — Parse owns that write exclusively.
+        with pytest.raises(s3.exceptions.NoSuchKey):
+            s3.get_object(Bucket=DATA_BUCKET, Key="prompts-content/req-large.json")
+
+    def test_content_in_s3_false_writes_inline_regardless_of_size(self, writer, table):
+        """content_in_s3 is taken as given — write_prompt no longer recomputes
+        the threshold from content length, so even large content stored inline
+        by the caller's decision is written inline here."""
+        prompt = "x" * 3000
+        response = "y" * 2000  # 5000 bytes, but caller decided contentInS3=False
+        record = {"requestId": "req-caller-decides", "timestamp": "2025-01-15T10:00:00Z"}
+
+        writer.write_prompt("user-1", record, prompt, response, content_in_s3=False)
+
+        item = table.get_item(
+            Key={"PK": "USER#user-1", "SK": "PROMPT#2025-01-15T10:00:00Z#req-caller-decides"}
+        )["Item"]
+
+        assert item["contentInS3"] is False
+        assert item["prompt"] == prompt
+        assert item["response"] == response
 
 
 # ------------------------------------------------------------------
