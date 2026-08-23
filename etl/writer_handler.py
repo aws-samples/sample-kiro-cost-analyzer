@@ -170,11 +170,17 @@ def _write_prompt_record(writer: AnalyticsWriter, record: dict, logger: Structur
     trigger_type = record.get("triggerType", "")
     prompt = record.get("prompt", "")
     response = record.get("response", "")
+    # Placement decision is made upstream by Parse (before the Step Functions
+    # Task output is constructed, to stay under the 256KB payload limit).
+    # Default False handles in-flight Map children still running the
+    # previous Parse output during a deploy window — that output always
+    # carries real inline content and never set this key.
+    content_in_s3 = record.get("contentInS3", False)
 
     items = 0
 
     # 1. Write prompt metadata (PutItem) — handles inline vs S3
-    writer.write_prompt(user_id, record, prompt, response, category=CATEGORY_NOT_CATEGORIZED)
+    writer.write_prompt(user_id, record, prompt, response, content_in_s3, category=CATEGORY_NOT_CATEGORIZED)
     items += 1
 
     # 2. Increment daily stats (interactions only)

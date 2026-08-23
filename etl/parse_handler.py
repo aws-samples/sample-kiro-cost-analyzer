@@ -7,9 +7,12 @@ normalized records ready for the Writer Lambda.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import traceback
+
+import boto3
 
 try:
     from processors.csv_processor import process_csv
@@ -34,6 +37,76 @@ try:
     from shared.structured_logger import StructuredLogger
 except ImportError:
     from utils.logging import StructuredLogger
+
+# 4KB threshold for inline vs S3 storage of prompt content. Moved here from
+# AnalyticsWriter.write_prompt: the decision must happen BEFORE the Step
+# Functions Task output is constructed, or a long response can push
+# ParseAndNormalize's output past the 256KB Step Functions payload limit
+# (States.DataLimitExceeded) before Writer ever runs.
+_INLINE_THRESHOLD_BYTES = 4096
+
+# Lazy singleton, reused across warm Lambda invocations. This is a plain
+# same-account client for the ETL stack's OWN data bucket — NOT the
+# cross_account_client used to read the (possibly cross-account) source
+# bucket, and NOT interchangeable with it.
+_data_bucket_s3_client = None
+
+
+def _get_data_bucket_s3_client():
+    """Return a lazily-initialized same-account S3 client for the data bucket."""
+    global _data_bucket_s3_client  # noqa: PLW0603 - Singleton pattern for Lambda warm-start optimization
+    if _data_bucket_s3_client is None:
+        _data_bucket_s3_client = boto3.client("s3")
+    return _data_bucket_s3_client
+
+
+def _resolve_content_placement(
+    records: list[dict],
+    data_bucket: str,
+    s3_client,
+    logger: "StructuredLogger",
+) -> None:
+    """Decide inline vs S3 storage for each prompt record's content, in place.
+
+    For every record whose combined UTF-8 byte size of ``prompt`` + ``response``
+    exceeds _INLINE_THRESHOLD_BYTES, the content is written to
+    ``prompts-content/{requestId}.json`` in *data_bucket* (same key format and
+    JSON shape Writer used to produce), ``contentInS3`` is set to True, and
+    ``prompt``/``response`` are cleared to empty strings so they never cross
+    the Step Functions Task output boundary. Records at or below the
+    threshold are left untouched aside from setting ``contentInS3`` to False.
+
+    Mutates *records* in place. Raises on any S3 failure — deliberately not
+    swallowed, so Step Functions retries ParseAndNormalize via its existing
+    Retry clause instead of silently dropping prompt content.
+    """
+    for record in records:
+        prompt = record.get("prompt", "")
+        response = record.get("response", "")
+        combined_size = len(prompt.encode("utf-8")) + len(response.encode("utf-8"))
+        content_in_s3 = combined_size > _INLINE_THRESHOLD_BYTES
+        record["contentInS3"] = content_in_s3
+
+        if content_in_s3:
+            request_id = record["requestId"]
+            s3_key = f"prompts-content/{request_id}.json"
+            s3_client.put_object(
+                Bucket=data_bucket,
+                Key=s3_key,
+                Body=json.dumps(
+                    {"prompt": prompt, "response": response},
+                    ensure_ascii=False,
+                ).encode("utf-8"),
+                ContentType="application/json",
+            )
+            record["prompt"] = ""
+            record["response"] = ""
+            logger.info(
+                "Prompt content moved to S3",
+                requestId=request_id,
+                combinedSizeBytes=combined_size,
+                s3Key=s3_key,
+            )
 
 
 def _extract_prompt_path_metadata(s3_key: str, prompts_prefix: str) -> dict:
@@ -147,6 +220,14 @@ def parse_handler(event, context):  # noqa: ARG001 - Lambda handler contract req
                 identity_client=identity_client,
             )
             _enrich_records_with_names(records, name_cache)
+
+        # Resolve inline-vs-S3 placement for prompt content BEFORE returning.
+        # Must happen here, not in Writer, so an oversized prompt/response
+        # never crosses the 256KB Step Functions Task payload limit between
+        # Parse and Writer (see .kiro/specs/etl-parse-payload-size/).
+        if file_type == "prompt" and records:
+            data_bucket = os.environ.get("DATA_BUCKET", "")
+            _resolve_content_placement(records, data_bucket, _get_data_bucket_s3_client(), logger)
 
         logger.info(
             "Parse complete",

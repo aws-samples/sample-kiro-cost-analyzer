@@ -1,5 +1,6 @@
 """Tests for etl.parse_handler module."""
 
+import json
 import os
 from unittest.mock import MagicMock, patch
 
@@ -9,6 +10,7 @@ from etl.parse_handler import (
     _collect_user_ids,
     _enrich_records_with_names,
     _extract_prompt_path_metadata,
+    _resolve_content_placement,
     parse_handler,
 )
 
@@ -18,6 +20,7 @@ ENV_VARS = {
     "PROMPTS_PREFIX": "prompts/AWSLogs/673826570926/KiroLogs/",
     "IDENTITY_STORE_ID": "d-1234567890",
     "USER_NAMES_TABLE": "UserNamesTable",
+    "DATA_BUCKET": "test-data-bucket",
 }
 
 
@@ -85,6 +88,178 @@ class TestEnrichRecordsWithNames:
         records = [{"userId": "unknown", "displayName": "orig", "userName": "orig"}]
         _enrich_records_with_names(records, {})
         assert records[0]["displayName"] == "orig"
+
+
+# ---------------------------------------------------------------------------
+# _resolve_content_placement
+# ---------------------------------------------------------------------------
+
+class TestResolveContentPlacement:
+    """Covers .kiro/specs/etl-parse-payload-size/ Requirement 1.1/1.2/1.3."""
+
+    def test_large_content_written_to_s3_and_cleared(self):
+        mock_logger = MagicMock()
+        mock_s3 = MagicMock()
+        prompt = "x" * 3000
+        response = "y" * 2000  # 5000 bytes > 4096 threshold
+        records = [{"requestId": "req-large", "prompt": prompt, "response": response}]
+
+        _resolve_content_placement(records, "test-data-bucket", mock_s3, mock_logger)
+
+        assert records[0]["contentInS3"] is True
+        assert records[0]["prompt"] == ""
+        assert records[0]["response"] == ""
+
+        mock_s3.put_object.assert_called_once()
+        call_kwargs = mock_s3.put_object.call_args.kwargs
+        assert call_kwargs["Bucket"] == "test-data-bucket"
+        assert call_kwargs["Key"] == "prompts-content/req-large.json"
+        body = json.loads(call_kwargs["Body"])
+        assert body == {"prompt": prompt, "response": response}
+
+    def test_small_content_stays_inline_no_s3_call(self):
+        mock_logger = MagicMock()
+        mock_s3 = MagicMock()
+        records = [{"requestId": "req-small", "prompt": "hello", "response": "world"}]
+
+        _resolve_content_placement(records, "test-data-bucket", mock_s3, mock_logger)
+
+        assert records[0]["contentInS3"] is False
+        assert records[0]["prompt"] == "hello"
+        assert records[0]["response"] == "world"
+        mock_s3.put_object.assert_not_called()
+
+    def test_boundary_exactly_4096_stays_inline(self):
+        mock_logger = MagicMock()
+        mock_s3 = MagicMock()
+        prompt = "a" * 2048
+        response = "b" * 2048  # combined exactly 4096
+        records = [{"requestId": "req-boundary", "prompt": prompt, "response": response}]
+
+        _resolve_content_placement(records, "test-data-bucket", mock_s3, mock_logger)
+
+        assert records[0]["contentInS3"] is False
+        mock_s3.put_object.assert_not_called()
+
+    def test_multiple_records_mixed_placement(self):
+        mock_logger = MagicMock()
+        mock_s3 = MagicMock()
+        records = [
+            {"requestId": "req-1", "prompt": "small", "response": "reply"},
+            {"requestId": "req-2", "prompt": "z" * 5000, "response": ""},
+        ]
+
+        _resolve_content_placement(records, "test-data-bucket", mock_s3, mock_logger)
+
+        assert records[0]["contentInS3"] is False
+        assert records[1]["contentInS3"] is True
+        assert records[1]["prompt"] == ""
+        mock_s3.put_object.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# parse_handler — prompt path: incident regression (States.DataLimitExceeded)
+# ---------------------------------------------------------------------------
+
+class TestParseHandlerPromptPayloadSizeRegression:
+    """Directly reproduces and disproves the 2026-08-21..23 production incident:
+    ParseAndNormalize's Task output exceeded the Step Functions 256KB payload
+    limit (States.DataLimitExceeded) because prompt/response were always
+    returned inline. See .kiro/specs/etl-parse-payload-size/."""
+
+    @patch.dict(os.environ, ENV_VARS)
+    @patch("etl.parse_handler.get_config")
+    @patch("etl.parse_handler.get_identity_store_client", return_value=None)
+    @patch("etl.parse_handler.get_s3_client", return_value=None)
+    @patch("etl.parse_handler._get_data_bucket_s3_client")
+    @patch("etl.parse_handler.resolve_names")
+    @patch("etl.parse_handler.process_prompts")
+    @patch("etl.parse_handler.read_prompt_file")
+    def test_oversized_response_moved_to_s3_stays_under_task_limit(
+        self, mock_read, mock_process, mock_names, mock_get_data_s3, _mock_s3, _mock_idc, mock_get_config,
+    ):
+        mock_get_config.return_value = _make_cfg()
+        mock_read.return_value = b"\x1f\x8b..."
+        mock_data_s3 = MagicMock()
+        mock_get_data_s3.return_value = mock_data_s3
+
+        # Reproduce the incident: a single record with a ~500KB generated
+        # response — well past what a 256KB Step Functions Task payload
+        # can hold once JSON-serialized alongside the rest of the envelope.
+        oversized_response = "R" * (500 * 1024)
+        mock_process.return_value = [
+            {
+                "userId": "u2",
+                "requestId": "req-oversized",
+                "timestamp": "2026-08-21T05:18:00Z",
+                "displayName": "",
+                "userName": "",
+                "prompt": "generate a large module",
+                "response": oversized_response,
+            },
+        ]
+        mock_names.return_value = {"u2": ("Bob", "bob")}
+
+        event = {
+            "bucket": "my-bucket",
+            "key": "prompts/AWSLogs/673826570926/KiroLogs/GenerateAssistantResponse/us-east-1/2026/08/21/05/file.json.gz",
+            "fileType": "prompt",
+            "correlationId": "exec-incident",
+        }
+        result = parse_handler(event, None)
+
+        # The oversized content was moved to S3 exactly once.
+        mock_data_s3.put_object.assert_called_once()
+        put_kwargs = mock_data_s3.put_object.call_args.kwargs
+        assert put_kwargs["Key"] == "prompts-content/req-oversized.json"
+
+        # The Task output no longer carries the oversized text. Both prompt
+        # and response are cleared — the full pair now lives together at
+        # prompts-content/{requestId}.json, matching AnalyticsWriter's
+        # original combined-object shape.
+        assert result["records"][0]["contentInS3"] is True
+        assert result["records"][0]["response"] == ""
+        assert result["records"][0]["prompt"] == ""
+        assert put_kwargs["Body"]
+        body = json.loads(put_kwargs["Body"])
+        assert body["prompt"] == "generate a large module"
+        assert body["response"] == oversized_response
+
+        # The full Task output, JSON-serialized as Step Functions would size
+        # it, is now far under the 256KB (262144 byte) hard limit — this is
+        # the direct regression check for States.DataLimitExceeded.
+        serialized_size = len(json.dumps(result).encode("utf-8"))
+        assert serialized_size < 262144
+
+    @patch.dict(os.environ, ENV_VARS)
+    @patch("etl.parse_handler.get_config")
+    @patch("etl.parse_handler.get_identity_store_client", return_value=None)
+    @patch("etl.parse_handler.get_s3_client", return_value=None)
+    @patch("etl.parse_handler.resolve_names")
+    @patch("etl.parse_handler.process_csv")
+    @patch("etl.parse_handler.read_csv_content")
+    @patch("etl.parse_handler.resolve_path_metadata")
+    def test_csv_records_are_not_touched_by_content_placement(
+        self, mock_resolve_path, mock_read, mock_process, mock_names, _mock_s3, _mock_idc, mock_get_config,
+    ):
+        """Requirement 1.5: CSV records must never gain a contentInS3 key."""
+        mock_get_config.return_value = _make_cfg()
+        mock_resolve_path.return_value = {"format_type": "new", "region": "us-east-1", "account_id": "123"}
+        mock_read.return_value = "csv,content"
+        mock_process.return_value = [
+            {"userId": "u1", "date": "2025-01-15", "totalCredits": 10, "displayName": "", "userName": ""},
+        ]
+        mock_names.return_value = {"u1": ("Alice", "alice")}
+
+        event = {
+            "bucket": "my-bucket",
+            "key": "activities/AWSLogs/123/KiroLogs/user_report/us-east-1/2025/01/15/00/file.csv",
+            "fileType": "csv",
+            "correlationId": "exec-csv",
+        }
+        result = parse_handler(event, None)
+
+        assert "contentInS3" not in result["records"][0]
 
 
 # ---------------------------------------------------------------------------
@@ -156,16 +331,18 @@ class TestParseHandlerPrompt:
     @patch("etl.parse_handler.get_config")
     @patch("etl.parse_handler.get_identity_store_client", return_value=None)
     @patch("etl.parse_handler.get_s3_client", return_value=None)
+    @patch("etl.parse_handler._get_data_bucket_s3_client")
     @patch("etl.parse_handler.resolve_names")
     @patch("etl.parse_handler.process_prompts")
     @patch("etl.parse_handler.read_prompt_file")
     def test_prompt_happy_path(
-        self, mock_read, mock_process, mock_names, _mock_s3, _mock_idc, mock_get_config,
+        self, mock_read, mock_process, mock_names, mock_get_data_s3, _mock_s3, _mock_idc, mock_get_config,
     ):
         mock_get_config.return_value = _make_cfg()
         mock_read.return_value = b"\x1f\x8b..."
+        mock_get_data_s3.return_value = MagicMock()
         mock_process.return_value = [
-            {"userId": "u2", "requestId": "req-1", "displayName": "", "userName": ""},
+            {"userId": "u2", "requestId": "req-1", "displayName": "", "userName": "", "prompt": "hi", "response": "hey"},
         ]
         mock_names.return_value = {"u2": ("Bob", "bob")}
 
@@ -180,6 +357,9 @@ class TestParseHandlerPrompt:
         assert result["fileType"] == "prompt"
         assert result["recordCount"] == 1
         assert result["records"][0]["userName"] == "bob"
+        # Content placement always runs for prompt records; small content
+        # (well under 4KB) stays inline.
+        assert result["records"][0]["contentInS3"] is False
 
     @patch.dict(os.environ, ENV_VARS)
     @patch("etl.parse_handler.get_config")

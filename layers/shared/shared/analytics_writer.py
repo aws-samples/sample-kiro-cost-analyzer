@@ -12,9 +12,6 @@ try:
 except ImportError:
     from utils.sk_normalizer import normalize_sk_value
 
-# 4KB threshold for inline vs S3 storage of prompt content.
-_INLINE_THRESHOLD_BYTES = 4096
-
 
 class AnalyticsWriter:
     """Encapsulates all DynamoDB write operations for the Analytics_Table.
@@ -45,20 +42,20 @@ class AnalyticsWriter:
         prompt_record: dict,
         prompt_content: str,
         response_content: str,
+        content_in_s3: bool,
         category: str = "",
     ) -> None:
         """PutItem for prompt metadata.
 
-        Decides inline vs S3 based on the combined UTF-8 byte size of
-        *prompt_content* and *response_content*.
+        ``content_in_s3`` reflects a placement decision already made
+        upstream (by the Parse Lambda, based on the combined UTF-8 byte
+        size of prompt/response). When True, the S3 object at
+        ``prompts-content/{requestId}.json`` is assumed to already exist
+        and is NOT written again here — this method only records the
+        flag on the DynamoDB item.
         """
         request_id = prompt_record["requestId"]
         timestamp = prompt_record["timestamp"]
-
-        combined_size = len(prompt_content.encode("utf-8")) + len(
-            response_content.encode("utf-8")
-        )
-        content_in_s3 = combined_size > _INLINE_THRESHOLD_BYTES
 
         item = {
             "PK": f"USER#{user_id}",
@@ -79,19 +76,7 @@ class AnalyticsWriter:
             "category": category,
         }
 
-        if content_in_s3:
-            # Write content to S3
-            s3_key = f"prompts-content/{request_id}.json"
-            self._s3.put_object(
-                Bucket=self._data_bucket,
-                Key=s3_key,
-                Body=json.dumps(
-                    {"prompt": prompt_content, "response": response_content},
-                    ensure_ascii=False,
-                ).encode("utf-8"),
-                ContentType="application/json",
-            )
-        else:
+        if not content_in_s3:
             item["prompt"] = prompt_content
             item["response"] = response_content
 

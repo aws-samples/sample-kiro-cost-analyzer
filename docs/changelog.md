@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Fix — ETL `Parse` no longer exceeds the Step Functions 256KB Task payload limit
+
+- `Parse` now decides prompt/response inline-vs-S3 placement (the existing 4KB threshold) before returning its Step Functions Task output, instead of `Writer` deciding it afterward. A long generated response could previously push `ParseAndNormalize`'s output past the 256KB Task limit, failing the child execution with `States.DataLimitExceeded` and — since the `etl-error-propagation` fix (v2.7) — failing the whole ETL run. Fixes a production incident where every scheduled ETL run failed from 2026-08-21 through 2026-08-23. No change to the `prompts-content/{requestId}.json` object key/shape, DynamoDB schema, or the categorization pipeline. Spec: `.kiro/specs/etl-parse-payload-size/`.
+
 ## v3.6 — Design Critique Completion (2026-08-18)
 
 ### Feature — Design critique completion: navigation clarity, tab hierarchy, churn-risk context
