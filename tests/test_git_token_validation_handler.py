@@ -510,6 +510,57 @@ class TestCredentialNonDisclosure:
 
 
 # ---------------------------------------------------------------------------
+# Route pattern ordering
+# ---------------------------------------------------------------------------
+
+
+class TestRoutePatterns:
+    """The literal validation path must never be parsed as a repository id.
+
+    ``_GIT_REPO_DETAIL_PATTERN`` is ``^/api/git/repos/([^/]+)$``, which would
+    happily capture "validate-token" as a repoId. These assertions pin the
+    discrimination that keeps the two routes apart.
+    """
+
+    def test_literal_path_is_not_captured_as_a_repo_id(self):
+        from backend import handler as api
+
+        literal = api._GIT_REPO_VALIDATE_TOKEN_PATH
+        assert api._GIT_REPO_VALIDATE_TOKEN_PATTERN.match(literal) is None
+
+    def test_scoped_path_is_captured_with_its_repo_id(self):
+        from backend import handler as api
+
+        match = api._GIT_REPO_VALIDATE_TOKEN_PATTERN.match(
+            "/api/git/repos/efa4ed67/validate-token"
+        )
+        assert match is not None
+        assert match.group(1) == "efa4ed67"
+
+    def test_scoped_path_is_not_captured_by_the_detail_pattern(self):
+        from backend import handler as api
+
+        assert (
+            api._GIT_REPO_DETAIL_PATTERN.match(
+                "/api/git/repos/efa4ed67/validate-token"
+            )
+            is None
+        )
+
+    def test_sync_and_validation_patterns_do_not_overlap(self):
+        from backend import handler as api
+
+        scoped = "/api/git/repos/efa4ed67/validate-token"
+        assert api._GIT_REPO_SYNC_PATTERN.match(scoped) is None
+        assert (
+            api._GIT_REPO_VALIDATE_TOKEN_PATTERN.match(
+                "/api/git/repos/efa4ed67/sync"
+            )
+            is None
+        )
+
+
+# ---------------------------------------------------------------------------
 # Correctness properties (design.md properties 1-3)
 # ---------------------------------------------------------------------------
 
