@@ -239,6 +239,40 @@ export interface GitUserMapping {
   createdAt: string;
 }
 
+/** One probed provider operation the correlation agent depends on. */
+export type GitTokenCheckId = 'repo_access' | 'commits' | 'pull_requests';
+
+/** Outcome of a single check. Stable slugs — the UI maps them to labels. */
+export type GitTokenCheckStatus =
+  | 'ok'
+  | 'unauthorized'
+  | 'forbidden'
+  | 'not_found'
+  | 'rate_limited'
+  | 'unreachable'
+  | 'error';
+
+export interface GitTokenCheck {
+  id: GitTokenCheckId;
+  status: GitTokenCheckStatus;
+  /** The observed HTTP status, or null when no response was received. */
+  httpStatus: number | null;
+}
+
+/**
+ * Result of probing a token against the operations the correlation agent
+ * needs. `requiredPermissions` holds provider permission identifiers
+ * (e.g. `contents:read`, `read_api`) for every check that did not pass.
+ */
+export interface GitTokenValidation {
+  provider: 'github' | 'gitlab';
+  overall: 'ok' | 'partial' | 'failed';
+  /** True when no token is stored at all, as opposed to one being rejected. */
+  tokenMissing: boolean;
+  checks: GitTokenCheck[];
+  requiredPermissions: string[];
+}
+
 /**
  * Response body returned by `createGitMapping`. `replaced` describes the
  * transaction (whether this create replaced an existing mapping for the

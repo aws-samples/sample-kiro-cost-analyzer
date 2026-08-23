@@ -3,6 +3,7 @@ import type {
   GitRepository,
   GitUserMapping,
   GitMappingCreated,
+  GitTokenValidation,
   GitActivityResponse,
   CorrelationResponse,
   CorrelationAnalysis,
@@ -41,6 +42,27 @@ export function deleteGitRepo(repoId: string): Promise<{ status: string }> {
 
 export function triggerGitSync(repoId: string): Promise<{ status: string; message: string }> {
   return post<{ status: string; message: string }>(`/api/git/repos/${repoId}/sync`);
+}
+
+/**
+ * Probe a token that has not been saved yet, so a repository is never
+ * registered with credentials that cannot read what the correlation agent
+ * needs. The token is validated and discarded — nothing is persisted.
+ */
+export function validateGitToken(body: {
+  url: string;
+  provider: string;
+  accessToken: string;
+}): Promise<GitTokenValidation> {
+  return post<GitTokenValidation>('/api/git/repos/validate-token', body);
+}
+
+/**
+ * Probe the token already stored for a registered repository. Accepts no
+ * token, so a passing result reflects exactly what is deployed.
+ */
+export function validateStoredGitToken(repoId: string): Promise<GitTokenValidation> {
+  return post<GitTokenValidation>(`/api/git/repos/${repoId}/validate-token`, {});
 }
 
 // --- User Mappings ---

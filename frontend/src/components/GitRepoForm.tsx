@@ -7,9 +7,12 @@ import Button from '@cloudscape-design/components/button';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import Box from '@cloudscape-design/components/box';
 import Alert from '@cloudscape-design/components/alert';
+import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import { useI18n } from '../i18n/useI18n';
 import { buildProviderOptions } from '../constants/gitProviders';
-import type { GitRepository } from '../types';
+import { validateGitToken } from '../api/gitApi';
+import GitTokenValidationModal from './GitTokenValidationModal';
+import type { GitRepository, GitTokenValidation } from '../types';
 
 function isValidUrl(url: string): boolean {
   try {
@@ -50,6 +53,49 @@ export default function GitRepoForm({ visible, onDismiss, onSubmit, editTarget }
   const [providerError, setProviderError] = useState('');
   const [tokenError, setTokenError] = useState('');
 
+  // Permission validation is deliberately separate from submit: validating
+  // never saves, and saving never silently validates.
+  const [validating, setValidating] = useState(false);
+  const [validationOk, setValidationOk] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [validationResult, setValidationResult] = useState<GitTokenValidation | null>(null);
+
+  const canValidate =
+    url.trim().length > 0 && !!provider?.value && accessToken.trim().length > 0;
+
+  function resetValidation() {
+    setValidating(false);
+    setValidationOk(false);
+    setValidationError(null);
+    setValidationResult(null);
+  }
+
+  async function handleValidate() {
+    if (!canValidate || validating) return;
+    setValidating(true);
+    setValidationOk(false);
+    setValidationError(null);
+    setValidationResult(null);
+    try {
+      const result = await validateGitToken({
+        url: url.trim(),
+        provider: provider!.value!,
+        accessToken: accessToken.trim(),
+      });
+      if (result.overall === 'ok') {
+        setValidationOk(true);
+      } else {
+        setValidationResult(result);
+      }
+    } catch (err) {
+      setValidationError(
+        err instanceof Error ? err.message : t('gitTokenValidation.error.generic'),
+      );
+    } finally {
+      setValidating(false);
+    }
+  }
+
   // Prefill in edit mode; token is always collected fresh (never echoed).
   useEffect(() => {
     if (visible && editTarget) {
@@ -59,6 +105,7 @@ export default function GitRepoForm({ visible, onDismiss, onSubmit, editTarget }
       setAccessToken('');
       setError(null);
       setNameError(''); setUrlError(''); setProviderError(''); setTokenError('');
+      resetValidation();
     }
     // PROVIDER_OPTIONS is rebuilt per render from t(); keying the effect on
     // the target identity + visibility is sufficient for prefill.
@@ -68,6 +115,7 @@ export default function GitRepoForm({ visible, onDismiss, onSubmit, editTarget }
   function resetForm() {
     setName(''); setUrl(''); setProvider(null); setAccessToken(''); setError(null);
     setNameError(''); setUrlError(''); setProviderError(''); setTokenError('');
+    resetValidation();
   }
 
   function validate(): boolean {
@@ -132,9 +180,29 @@ export default function GitRepoForm({ visible, onDismiss, onSubmit, editTarget }
           errorText={tokenError}
           description={t(isEdit ? 'gitRepoForm.field.token.editDescription' : 'gitRepoForm.field.token.description')}
         >
-          <Input value={accessToken} onChange={({ detail }) => setAccessToken(detail.value)} type="password" />
+          <Input value={accessToken} onChange={({ detail }) => { setAccessToken(detail.value); resetValidation(); }} type="password" />
         </FormField>
+        <SpaceBetween size="xs">
+          <Button
+            variant="normal"
+            onClick={handleValidate}
+            loading={validating}
+            disabled={!canValidate}
+          >
+            {t('gitTokenValidation.button.validate')}
+          </Button>
+          {validationOk && (
+            <StatusIndicator type="success">
+              {t('gitTokenValidation.summary.ok')}
+            </StatusIndicator>
+          )}
+          {validationError && <Alert type="error">{validationError}</Alert>}
+        </SpaceBetween>
       </SpaceBetween>
+      <GitTokenValidationModal
+        result={validationResult}
+        onDismiss={() => setValidationResult(null)}
+      />
     </Modal>
   );
 }
