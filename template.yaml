@@ -1134,6 +1134,7 @@ Resources:
       Environment:
         Variables:
           SSM_ETL_STATUS: /kiro-cost-analyzer/etl-status
+          ANALYTICS_TABLE: !Ref AnalyticsTable
       Policies:
         - Statement:
             - Sid: SSMAccess
@@ -1142,6 +1143,20 @@ Resources:
                 - ssm:PutParameter
               Resource:
                 - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/kiro-cost-analyzer/*"
+            - Sid: WriteExecutionRecord
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource:
+                - !GetAtt AnalyticsTable.Arn
+            - Sid: KMSForDynamoDB
+              Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+                - kms:DescribeKey
+              Resource:
+                - !GetAtt KCAEncryptionKey.Arn
             - Sid: ReadMapResults
               Effect: Allow
               Action:
@@ -1702,6 +1717,12 @@ Resources:
             RestApiId: !Ref ApiGateway
             Path: /api/etl/trigger
             Method: POST
+        EtlExecutionsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/etl/executions
+            Method: GET
         UsersGet:
           Type: Api
           Properties:
@@ -1940,6 +1961,7 @@ Resources:
               Effect: Allow
               Action:
                 - states:StartExecution
+                - states:ListExecutions
               Resource:
                 - !Ref EtlStateMachine
             - Sid: SSMAccess

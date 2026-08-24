@@ -662,3 +662,22 @@ class TestRemovedWriteRoutesAlwaysNotFound:
         assert resp["statusCode"] == 404
         response_body = json.loads(resp["body"])
         assert response_body["error"] == "NotFound"
+
+
+class TestGetEtlExecutions:
+    """Routing tests for GET /api/etl/executions — admin-gated."""
+
+    @patch("backend.handler.etl_executions_handler")
+    def test_admin_routes_to_handler(self, mock_mod):
+        mock_mod.handle_etl_executions.return_value = {"days": 5, "executions": []}
+        event = _make_event("GET", "/api/etl/executions", query_params={"days": "5"}, groups="Admins")
+        resp = lambda_handler(event, None)
+        assert resp["statusCode"] == 200
+        mock_mod.handle_etl_executions.assert_called_once_with({"days": "5"})
+
+    def test_non_admin_gets_403(self):
+        event = _make_event("GET", "/api/etl/executions", groups="")
+        resp = lambda_handler(event, None)
+        assert resp["statusCode"] == 403
+        body = json.loads(resp["body"])
+        assert body["error"] == "Forbidden"

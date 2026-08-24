@@ -149,6 +149,87 @@ def _format_error(key: str, error_info: dict) -> str:
     return f"Error processing {key}: {error_info}"[:200]
 
 
+def _execution_name_from_arn(execution_id: str) -> str:
+    """Extract the execution name from a Step Functions execution ARN.
+
+    The name is the segment after the last ``:``. Anything that does not look
+    like an ARN with at least one ``:`` yields an empty string, which callers
+    treat as "no execution record can be written".
+
+    Args:
+        execution_id: Step Functions execution ARN.
+
+    Returns:
+        The execution name, or an empty string when it cannot be derived.
+    """
+    if not isinstance(execution_id, str) or ":" not in execution_id:
+        return ""
+    return execution_id.rsplit(":", 1)[-1].strip()
+
+
+def _write_execution_record(
+    execution_id: str,
+    status: str,
+    files_processed: int,
+    records_written: int,
+    logger: StructuredLogger,
+    dynamodb_resource=None,
+) -> None:
+    """Persist a per-execution history record to the analytics table.
+
+    Writes ``PK=ETL_STATUS`` / ``SK=EXEC#{executionName}`` with the counters that
+    Step Functions itself does not track. This mirrors the item the
+    ``RecordStatusNoFiles`` state writes on the "no new files" path, so both
+    paths leave one comparable record per execution.
+
+    This function never raises. By the time it runs, the ETL has already loaded
+    its data and recorded the aggregate status; failing the execution because a
+    history row could not be written would turn a cosmetic gap into a
+    data-freshness incident. Failures are logged instead.
+
+    Args:
+        execution_id: Step Functions execution ARN.
+        status: ``SUCCESS`` or ``ERROR``.
+        files_processed: Count of files processed successfully.
+        records_written: Total DynamoDB items written by the run.
+        logger: Structured logger for the current invocation.
+        dynamodb_resource: Optional pre-configured DynamoDB resource for testing.
+    """
+    try:
+        table_name = os.environ.get("ANALYTICS_TABLE", "")
+        execution_name = _execution_name_from_arn(execution_id)
+
+        if not table_name or not execution_name:
+            logger.info(
+                "Skipping execution record write",
+                hasTableName=bool(table_name),
+                hasExecutionName=bool(execution_name),
+            )
+            return
+
+        resource = dynamodb_resource or boto3.resource("dynamodb")
+        resource.Table(table_name).put_item(
+            Item={
+                "PK": "ETL_STATUS",
+                "SK": f"EXEC#{execution_name}",
+                "status": status,
+                "filesProcessed": int(files_processed),
+                "recordsWritten": int(records_written),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "executionArn": execution_id,
+            }
+        )
+
+        logger.info("Execution record persisted", executionName=execution_name)
+
+    except Exception as exc:  # noqa: BLE001 - history write must never fail the ETL
+        logger.error(
+            "Failed to persist execution record",
+            errorType=type(exc).__name__,
+            errorMessage=str(exc),
+        )
+
+
 def record_status_handler(event, context):  # noqa: ARG001 - Lambda handler contract requires context parameter
     """RecordStatus Lambda entry point.
 
@@ -219,6 +300,16 @@ def record_status_handler(event, context):  # noqa: ARG001 - Lambda handler cont
             Value=value,
             Type="String",
             Overwrite=True,
+        )
+
+        # Aggregate status is recorded above and must not be affected by the
+        # history write, so this runs afterwards and swallows its own failures.
+        _write_execution_record(
+            execution_id=execution_id,
+            status=status,
+            files_processed=summary["filesSuccess"],
+            records_written=summary["totalItemsWritten"],
+            logger=logger,
         )
 
         if summary["filesFailed"] > 0:

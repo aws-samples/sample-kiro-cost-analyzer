@@ -16,12 +16,22 @@ import SkeletonLoader from '../components/SkeletonLoader';
 import PricingSettingsPanel from '../components/PricingSettingsPanel';
 import EngagementSettingsPanel from '../components/EngagementSettingsPanel';
 import PromptHistoryToggle from '../components/PromptHistoryToggle';
+import EtlExecutionHistory from '../components/EtlExecutionHistory';
 import { useAuth } from '../auth/useAuth';
 import { useI18n } from '../i18n/useI18n';
 import { humanize } from '../utils/cronHumanizer';
-import type { AppConfig, EtlStatus, EtlSchedule } from '../types';
+import type {
+  AppConfig,
+  EtlStatus,
+  EtlSchedule,
+  EtlExecution,
+  EtlExecutionsResponse,
+} from '../types';
 
 const NOT_CONFIGURED_PLACEHOLDER = '—';
+
+/** Trailing window, in days, covered by the ETL execution history table. */
+const ETL_HISTORY_DAYS = 5;
 
 // Exported for the Property 2 frontend-counterpart property test
 // (`SettingsPage.test.tsx`, feature `s3-source-config-readonly`), which
@@ -76,6 +86,9 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [triggerMsg, setTriggerMsg] = useState<string | null>(null);
+  const [executions, setExecutions] = useState<EtlExecution[]>([]);
+  const [executionsLoading, setExecutionsLoading] = useState(true);
+  const [executionsError, setExecutionsError] = useState<string | null>(null);
 
   const fetchConfig = useCallback(async () => {
     setLoading(true);
@@ -114,6 +127,28 @@ export default function SettingsPage() {
     fetchConfig();
   }, [fetchConfig]);
 
+  // Kept separate from fetchConfig so a slow or failing ListExecutions call
+  // cannot delay or break the ETL status card above it.
+  const fetchExecutions = useCallback(async () => {
+    setExecutionsLoading(true);
+    setExecutionsError(null);
+    try {
+      const resp = await get<EtlExecutionsResponse>('/api/etl/executions', {
+        days: String(ETL_HISTORY_DAYS),
+      });
+      setExecutions(resp.executions ?? []);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : t('settings.etl.history.error');
+      setExecutionsError(msg);
+    } finally {
+      setExecutionsLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    fetchExecutions();
+  }, [fetchExecutions]);
+
   const handleTriggerEtl = async () => {
     setTriggering(true);
     setTriggerMsg(null);
@@ -124,6 +159,8 @@ export default function SettingsPage() {
         setError(resp.message ?? t('settings.error.triggerEtl'));
       } else {
         setTriggerMsg(t('settings.success.etlTriggered'));
+        // Surface the run that was just started in the history table.
+        fetchExecutions();
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : t('settings.error.triggerEtl');
@@ -250,6 +287,18 @@ export default function SettingsPage() {
     </Container>
   );
 
+  const etlTabContent = (
+    <SpaceBetween size="l">
+      {etlContent}
+      <EtlExecutionHistory
+        executions={executions}
+        loading={executionsLoading}
+        error={executionsError}
+        days={ETL_HISTORY_DAYS}
+      />
+    </SpaceBetween>
+  );
+
   const promptsConfigError = error !== null;
 
   const dataContent = (
@@ -347,7 +396,7 @@ export default function SettingsPage() {
   );
 
   const configTabs: TabsProps.Tab[] = [
-    { id: 'etl', label: t('settings.tabs.etl'), content: etlContent },
+    { id: 'etl', label: t('settings.tabs.etl'), content: etlTabContent },
     { id: 'data', label: t('settings.tabs.data'), content: dataContent },
     { id: 'identity', label: t('settings.tabs.identity'), content: identityCenterContent },
     { id: 'engagement', label: t('settings.tabs.engagement'), content: <EngagementSettingsPanel /> },

@@ -18,6 +18,7 @@ from handlers import (
     agent_correlation_handler,
     config_handler,
     engagement_handler,
+    etl_executions_handler,
     etl_trigger_handler,
     export_handler,
     git_mapping_handler,
@@ -476,6 +477,15 @@ def _route(http_method: str, path: str, query_params: dict, body: dict, claims: 
                 "message": "Access restricted to administrators",
             })
         result = etl_trigger_handler.handle_etl_trigger()
+        return _build_response(200, result)
+
+    if http_method == "GET" and path == "/api/etl/executions":
+        if not _is_admin(claims):
+            return _build_response(403, {
+                "error": "Forbidden",
+                "message": "Access restricted to administrators",
+            })
+        result = etl_executions_handler.handle_etl_executions(query_params)
         return _build_response(200, result)
 
     if http_method == "GET" and path == "/api/users":

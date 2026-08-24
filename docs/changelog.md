@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+### Feature — ETL execution history
+
+- The Settings ETL tab gains an execution history table covering the trailing 5 days, with start date, end date, elapsed time, file count and status. New admin endpoint `GET /api/etl/executions?days=N` (`days` defaults to 5, clamped to 1..30).
+- Timing and outcome come from Step Functions `ListExecutions`, so the table has content immediately and also covers runs that failed before reaching the RecordStatus step. File and record counters come from per-execution DynamoDB records.
+- The `RecordStatus` Lambda now persists an `ETL_STATUS` / `EXEC#{executionName}` record on the "files processed" path. Previously only the "no new files" path wrote one, so the partition held exclusively the runs that did nothing. The write can never fail the ETL run. Executions that predate this change show their timing and status, with counters rendered as unknown rather than zero.
+- Permissions added: `states:ListExecutions` on the ETL state machine for the API function; `dynamodb:PutItem` on the analytics table plus the table's KMS key grants for the RecordStatus function.
+- Wording: the manual-run confirmation and the no-execution empty state now say the ETL *started* rather than was *triggered* / *disparado*, which matches what actually happens — a long execution begins and runs in the background.
+
 ## v3.7 — Git Token Permission Validation (2026-08-24)
 
 ### Feature — Validate Git token permissions from the Settings page
