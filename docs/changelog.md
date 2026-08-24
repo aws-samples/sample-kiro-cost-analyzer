@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## v3.7 — Git Token Permission Validation (2026-08-24)
+
 ### Feature — Validate Git token permissions from the Settings page
 
 - The Git settings page gains a "Validate permissions" action in two places: in the add/edit repository form (probing a token before it is saved) and as a per-row action on the repositories table (probing the token already stored in SSM). Each validation exercises the three provider operations the correlation agent actually depends on — repository metadata, commits, and pull/merge requests — and reports them independently, so a token that reads metadata but not contents is diagnosed as exactly that. When something is missing, a modal lists the permissions to grant in one shape for both providers, with the permission identifier in code type and the access level emphasised (GitHub: `Metadata`, `Contents`, `Pull requests` read-only, plus the classic `repo` scope alternative; GitLab: the `read_api` and `read_repository` scopes, plus the minimum `Reporter` project role).
