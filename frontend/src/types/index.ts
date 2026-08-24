@@ -81,6 +81,26 @@ export interface EtlSchedule {
   error?: boolean;
 }
 
+/**
+ * One ETL run. Timing and status come from Step Functions; the counters come
+ * from the per-execution record the ETL persists, and are null when no record
+ * exists for that run (not the same as a run that processed zero files).
+ */
+export interface EtlExecution {
+  executionName: string;
+  startDate: string | null;
+  stopDate: string | null;
+  elapsedSeconds: number | null;
+  status: string;
+  filesProcessed: number | null;
+  recordsWritten: number | null;
+}
+
+export interface EtlExecutionsResponse {
+  days: number;
+  executions: EtlExecution[];
+}
+
 export interface AppConfig {
   bucketName: string;
   sourcePrefix: string;

@@ -558,3 +558,428 @@ class TestComputeSummaryProperties:
         summary = _compute_summary([legacy])
         assert summary["filesFailed"] == 1
         assert summary["filesSuccess"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Execution history record tests (_execution_name_from_arn, _write_execution_record)
+# ---------------------------------------------------------------------------
+
+from moto import mock_aws
+
+from etl.record_status_handler import (
+    _execution_name_from_arn,
+    _write_execution_record,
+)
+
+
+ANALYTICS_TABLE = "analytics-table"
+VALID_ARN = "arn:aws:states:us-east-1:123456789012:execution:my-sm:exec-abc-123"
+EXECUTION_NAME = "exec-abc-123"
+
+ENV_VARS_WITH_TABLE = {
+    **ENV_VARS,
+    "ANALYTICS_TABLE": ANALYTICS_TABLE,
+}
+
+
+def _create_analytics_table():
+    """Create the mocked DynamoDB analytics table with PK (HASH) and SK (RANGE)."""
+    import boto3 as _boto3
+
+    ddb = _boto3.resource("dynamodb", region_name="us-east-1")
+    ddb.create_table(
+        TableName=ANALYTICS_TABLE,
+        KeySchema=[
+            {"AttributeName": "PK", "KeyType": "HASH"},
+            {"AttributeName": "SK", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "PK", "AttributeType": "S"},
+            {"AttributeName": "SK", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+    )
+    return ddb
+
+
+# ---------------------------------------------------------------------------
+# _execution_name_from_arn unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestExecutionNameFromArn:
+    """Unit tests for _execution_name_from_arn (requirement 6)."""
+
+    def test_full_valid_arn_returns_last_segment(self):
+        assert _execution_name_from_arn(VALID_ARN) == EXECUTION_NAME
+
+    def test_no_colon_returns_empty(self):
+        assert _execution_name_from_arn("not-an-arn") == ""
+
+    def test_empty_string_returns_empty(self):
+        assert _execution_name_from_arn("") == ""
+
+    def test_none_input_returns_empty(self):
+        assert _execution_name_from_arn(None) == ""
+
+    def test_integer_input_returns_empty(self):
+        assert _execution_name_from_arn(123) == ""
+
+    def test_trailing_whitespace_stripped(self):
+        assert _execution_name_from_arn(VALID_ARN + "  \t") == EXECUTION_NAME
+
+
+# ---------------------------------------------------------------------------
+# _write_execution_record — successful write via moto
+# ---------------------------------------------------------------------------
+
+
+class TestWriteExecutionRecordSuccess:
+    """Successful run writes the execution record (requirement 1)."""
+
+    @mock_aws
+    @patch.dict(os.environ, ENV_VARS_WITH_TABLE)
+    def test_writes_correct_item(self):
+        import boto3 as _boto3
+
+        ddb = _create_analytics_table()
+
+        logger = MagicMock()
+        _write_execution_record(
+            execution_id=VALID_ARN,
+            status="SUCCESS",
+            files_processed=5,
+            records_written=42,
+            logger=logger,
+            dynamodb_resource=ddb,
+        )
+
+        table = ddb.Table(ANALYTICS_TABLE)
+        resp = table.get_item(Key={"PK": "ETL_STATUS", "SK": f"EXEC#{EXECUTION_NAME}"})
+        item = resp["Item"]
+
+        assert item["PK"] == "ETL_STATUS"
+        assert item["SK"] == f"EXEC#{EXECUTION_NAME}"
+        assert item["status"] == "SUCCESS"
+        assert item["filesProcessed"] == 5
+        assert item["recordsWritten"] == 42
+        assert item["executionArn"] == VALID_ARN
+        # timestamp is ISO 8601 with timezone
+        from datetime import datetime as _dt
+
+        _dt.fromisoformat(item["timestamp"])  # raises if not valid ISO 8601
+
+
+# ---------------------------------------------------------------------------
+# _write_execution_record — invalid ARN / missing env var → no item written
+# ---------------------------------------------------------------------------
+
+
+class TestWriteExecutionRecordSkipsOnInvalidInput:
+    """ARN with no ':' or empty ARN → NO item written (requirement 2)."""
+
+    @mock_aws
+    @patch.dict(os.environ, ENV_VARS_WITH_TABLE)
+    def test_no_colon_arn_writes_nothing(self):
+        ddb = _create_analytics_table()
+        logger = MagicMock()
+
+        _write_execution_record(
+            execution_id="not-an-arn",
+            status="SUCCESS",
+            files_processed=1,
+            records_written=1,
+            logger=logger,
+            dynamodb_resource=ddb,
+        )
+
+        table = ddb.Table(ANALYTICS_TABLE)
+        resp = table.scan()
+        assert resp["Count"] == 0
+
+    @mock_aws
+    @patch.dict(os.environ, ENV_VARS_WITH_TABLE)
+    def test_empty_string_arn_writes_nothing(self):
+        ddb = _create_analytics_table()
+        logger = MagicMock()
+
+        _write_execution_record(
+            execution_id="",
+            status="SUCCESS",
+            files_processed=1,
+            records_written=1,
+            logger=logger,
+            dynamodb_resource=ddb,
+        )
+
+        table = ddb.Table(ANALYTICS_TABLE)
+        resp = table.scan()
+        assert resp["Count"] == 0
+
+    @mock_aws
+    @patch.dict(os.environ, {"SSM_ETL_STATUS": "/app/etl-status"})
+    def test_analytics_table_env_unset_writes_nothing(self):
+        """ANALYTICS_TABLE env var unset → no item written (requirement 3)."""
+        import boto3 as _boto3
+
+        # Create table anyway — we expect the function to bail before using it
+        ddb = _create_analytics_table()
+        logger = MagicMock()
+
+        _write_execution_record(
+            execution_id=VALID_ARN,
+            status="SUCCESS",
+            files_processed=1,
+            records_written=1,
+            logger=logger,
+            dynamodb_resource=ddb,
+        )
+
+        table = ddb.Table(ANALYTICS_TABLE)
+        resp = table.scan()
+        assert resp["Count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Handler integration — execution record written + SSM still called
+# ---------------------------------------------------------------------------
+
+
+class TestHandlerWritesExecutionRecord:
+    """Integration: full handler path writes execution record via moto (req 1)."""
+
+    @mock_aws
+    @patch.dict(os.environ, ENV_VARS_WITH_TABLE, clear=False)
+    @patch("etl.record_status_handler._read_map_results_from_s3")
+    def test_handler_writes_execution_record_on_success(self, mock_read_s3):
+        import boto3 as _boto3
+
+        _create_analytics_table()
+
+        # SSM needs to be available under moto too
+        ssm = _boto3.client("ssm", region_name="us-east-1")
+
+        mock_read_s3.return_value = ([
+            {"writeResult": {"recordCount": 10, "itemsWritten": 15}},
+        ], 0)
+
+        event = {
+            "executionId": VALID_ARN,
+            "listResult": {"newFilesCount": 1},
+            "mapResultsBucket": "data-bucket",
+            "mapResultsKey": "etl-results/manifest.json",
+        }
+
+        result = record_status_handler(event, None)
+
+        assert result["status"] == "SUCCESS"
+
+        # Verify DynamoDB record
+        ddb = _boto3.resource("dynamodb", region_name="us-east-1")
+        table = ddb.Table(ANALYTICS_TABLE)
+        resp = table.get_item(Key={"PK": "ETL_STATUS", "SK": f"EXEC#{EXECUTION_NAME}"})
+        item = resp["Item"]
+        assert item["status"] == "SUCCESS"
+        assert item["filesProcessed"] == 1
+        assert item["recordsWritten"] == 15
+        assert item["executionArn"] == VALID_ARN
+
+        # Verify SSM was still written
+        ssm_resp = ssm.get_parameter(Name="/app/etl-status")
+        payload = json.loads(ssm_resp["Parameter"]["Value"])
+        assert payload["status"] == "SUCCESS"
+
+
+# ---------------------------------------------------------------------------
+# Handler integration — invalid ARN still writes SSM, no DynamoDB item
+# ---------------------------------------------------------------------------
+
+
+class TestHandlerInvalidArnStillWritesSSM:
+    """Handler with invalid ARN: no DDB item, SSM still written (req 2)."""
+
+    @mock_aws
+    @patch.dict(os.environ, ENV_VARS_WITH_TABLE, clear=False)
+    @patch("etl.record_status_handler._read_map_results_from_s3")
+    def test_no_colon_arn_handler_still_returns_and_writes_ssm(self, mock_read_s3):
+        import boto3 as _boto3
+
+        _create_analytics_table()
+        mock_read_s3.return_value = ([
+            {"writeResult": {"recordCount": 3, "itemsWritten": 5}},
+        ], 0)
+
+        event = {
+            "executionId": "not-an-arn",
+            "listResult": {"newFilesCount": 1},
+            "mapResultsBucket": "bucket",
+            "mapResultsKey": "key.json",
+        }
+
+        result = record_status_handler(event, None)
+
+        assert result["status"] == "SUCCESS"
+
+        # SSM was written
+        ssm = _boto3.client("ssm", region_name="us-east-1")
+        ssm_resp = ssm.get_parameter(Name="/app/etl-status")
+        assert "SUCCESS" in ssm_resp["Parameter"]["Value"]
+
+        # No DynamoDB item
+        ddb = _boto3.resource("dynamodb", region_name="us-east-1")
+        table = ddb.Table(ANALYTICS_TABLE)
+        resp = table.scan()
+        assert resp["Count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# put_item failure → handler still returns normally (requirement 4)
+# ---------------------------------------------------------------------------
+
+
+class TestExecutionRecordFailureDoesNotBreakHandler:
+    """DynamoDB put_item raising must NOT fail the handler (requirement 4)."""
+
+    @patch.dict(os.environ, ENV_VARS_WITH_TABLE)
+    @patch("etl.record_status_handler.boto3")
+    @patch("etl.record_status_handler._read_map_results_from_s3")
+    def test_put_item_exception_handler_still_returns(self, mock_read_s3, mock_boto3):
+        mock_ssm = MagicMock()
+        mock_ddb_resource = MagicMock()
+        mock_table = MagicMock()
+        mock_table.put_item.side_effect = RuntimeError("DDB unavailable")
+        mock_ddb_resource.Table.return_value = mock_table
+
+        def client_side_effect(service, *a, **kw):
+            if service == "ssm":
+                return mock_ssm
+            return MagicMock()
+
+        mock_boto3.client.side_effect = client_side_effect
+        mock_boto3.resource.return_value = mock_ddb_resource
+
+        mock_read_s3.return_value = ([
+            {"writeResult": {"recordCount": 7, "itemsWritten": 9}},
+        ], 0)
+
+        event = {
+            "executionId": VALID_ARN,
+            "listResult": {"newFilesCount": 1},
+            "mapResultsBucket": "bucket",
+            "mapResultsKey": "key.json",
+        }
+
+        result = record_status_handler(event, None)
+
+        # Handler returned normally
+        assert result["status"] == "SUCCESS"
+        assert result["filesProcessed"] == 1
+        assert result["recordsWritten"] == 9
+
+        # SSM was still written
+        mock_ssm.put_parameter.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# SSM payload shape unchanged (requirement 5)
+# ---------------------------------------------------------------------------
+
+
+class TestSSMPayloadShapeUnchanged:
+    """SSM payload still has exactly 5 keys: lastExecution, status,
+    filesProcessed, recordsWritten, errors (requirement 5)."""
+
+    @mock_aws
+    @patch.dict(os.environ, ENV_VARS_WITH_TABLE, clear=False)
+    @patch("etl.record_status_handler._read_map_results_from_s3")
+    def test_ssm_payload_exact_keys(self, mock_read_s3):
+        import boto3 as _boto3
+
+        _create_analytics_table()
+        mock_read_s3.return_value = ([
+            {"writeResult": {"recordCount": 4, "itemsWritten": 6}},
+        ], 0)
+
+        event = {
+            "executionId": VALID_ARN,
+            "listResult": {"newFilesCount": 1},
+            "mapResultsBucket": "bucket",
+            "mapResultsKey": "key.json",
+        }
+
+        record_status_handler(event, None)
+
+        ssm = _boto3.client("ssm", region_name="us-east-1")
+        ssm_resp = ssm.get_parameter(Name="/app/etl-status")
+        payload = json.loads(ssm_resp["Parameter"]["Value"])
+
+        expected_keys = {"lastExecution", "status", "filesProcessed", "recordsWritten", "errors"}
+        assert set(payload.keys()) == expected_keys
+        assert payload["status"] == "SUCCESS"
+        assert payload["filesProcessed"] == 1
+        assert payload["recordsWritten"] == 6
+        assert isinstance(payload["errors"], list)
+        # lastExecution is an ISO 8601 timestamp
+        from datetime import datetime as _dt
+
+        _dt.fromisoformat(payload["lastExecution"])
+
+
+# ---------------------------------------------------------------------------
+# Hypothesis: _write_execution_record NEVER raises (requirement 7)
+# ---------------------------------------------------------------------------
+
+
+class TestWriteExecutionRecordNeverRaises:
+    """Property: _write_execution_record must NEVER raise, regardless of input
+    or DynamoDB failures (requirement 7)."""
+
+    @given(
+        execution_id=st.text(min_size=0, max_size=200),
+        status=st.text(min_size=0, max_size=50),
+        files_processed=st.integers(min_value=-1000, max_value=1_000_000),
+        records_written=st.integers(min_value=-1000, max_value=1_000_000),
+    )
+    @settings(max_examples=100)
+    @patch.dict(os.environ, ENV_VARS_WITH_TABLE)
+    def test_never_raises_with_failing_dynamodb(
+        self, execution_id, status, files_processed, records_written
+    ):
+        """Even when DynamoDB always raises, the function must not propagate."""
+        fake_logger = MagicMock()
+        stub_resource = MagicMock()
+        stub_resource.Table.return_value.put_item.side_effect = Exception("boom")
+
+        # Must not raise
+        _write_execution_record(
+            execution_id=execution_id,
+            status=status,
+            files_processed=files_processed,
+            records_written=records_written,
+            logger=fake_logger,
+            dynamodb_resource=stub_resource,
+        )
+
+    @given(
+        execution_id=st.text(min_size=0, max_size=200),
+        status=st.text(min_size=0, max_size=50),
+        files_processed=st.integers(min_value=-1000, max_value=1_000_000),
+        records_written=st.integers(min_value=-1000, max_value=1_000_000),
+    )
+    @settings(max_examples=100)
+    @patch.dict(os.environ, ENV_VARS_WITH_TABLE)
+    def test_never_raises_with_working_dynamodb(
+        self, execution_id, status, files_processed, records_written
+    ):
+        """Even with arbitrary text inputs, the function must not raise."""
+        fake_logger = MagicMock()
+        stub_resource = MagicMock()
+
+        _write_execution_record(
+            execution_id=execution_id,
+            status=status,
+            files_processed=files_processed,
+            records_written=records_written,
+            logger=fake_logger,
+            dynamodb_resource=stub_resource,
+        )
