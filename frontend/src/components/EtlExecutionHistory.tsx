@@ -2,6 +2,7 @@ import Table from '@cloudscape-design/components/table';
 import Container from '@cloudscape-design/components/container';
 import Header from '@cloudscape-design/components/header';
 import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
 import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import Alert from '@cloudscape-design/components/alert';
 import { useI18n } from '../i18n/useI18n';
@@ -18,6 +19,7 @@ interface EtlExecutionHistoryProps {
   loading: boolean;
   error: string | null;
   days: number;
+  onRefresh: () => void;
 }
 
 /**
@@ -34,6 +36,7 @@ export default function EtlExecutionHistory({
   loading,
   error,
   days,
+  onRefresh,
 }: EtlExecutionHistoryProps) {
   const { t, formatDateTime, formatNumber } = useI18n();
 
@@ -45,7 +48,18 @@ export default function EtlExecutionHistory({
   return (
     <Container
       header={
-        <Header variant="h2" description={t('settings.etl.history.description', { days })}>
+        <Header
+          variant="h2"
+          description={t('settings.etl.history.description', { days })}
+          actions={
+            <Button
+              iconName="refresh"
+              ariaLabel={t('common.refresh')}
+              onClick={onRefresh}
+              loading={loading}
+            />
+          }
+        >
           {t('settings.etl.history.title')}
         </Header>
       }
