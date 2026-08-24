@@ -295,6 +295,7 @@ export default function SettingsPage() {
         loading={executionsLoading}
         error={executionsError}
         days={ETL_HISTORY_DAYS}
+        onRefresh={fetchExecutions}
       />
     </SpaceBetween>
   );

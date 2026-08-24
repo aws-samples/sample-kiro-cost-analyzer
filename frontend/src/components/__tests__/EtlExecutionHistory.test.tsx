@@ -21,8 +21,8 @@
  * Validates Requirements 4.2, 4.5, 4.6, 4.7, 4.8.
  */
 
-import { render, screen, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import fc from 'fast-check';
 import type { ReactNode } from 'react';
 import { I18nProvider } from '../../i18n/I18nProvider';
@@ -78,6 +78,7 @@ function renderHistory(overrides: Partial<Parameters<typeof EtlExecutionHistory>
         loading={false}
         error={null}
         days={5}
+        onRefresh={() => {}}
         {...overrides}
       />
     </Harness>,
@@ -162,6 +163,25 @@ describe('EtlExecutionHistory', () => {
       executions: [{ ...SUCCEEDED, status: 'PENDING_REDRIVE' }],
     });
     expect(screen.getByText('PENDING_REDRIVE')).toBeInTheDocument();
+  });
+
+  it('calls onRefresh when the refresh button is clicked', () => {
+    const onRefresh = vi.fn();
+    renderHistory({ executions: [SUCCEEDED], onRefresh });
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the refresh button as loading while the history is being fetched', () => {
+    const onRefresh = vi.fn();
+    renderHistory({ loading: true, onRefresh });
+    // Cloudscape marks a loading button with aria-disabled rather than the HTML
+    // disabled attribute, so it stays focusable while refusing activation — a
+    // second click during an in-flight fetch cannot fire another request.
+    const button = screen.getByRole('button', { name: 'Refresh' });
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(button);
+    expect(onRefresh).not.toHaveBeenCalled();
   });
 });
 
