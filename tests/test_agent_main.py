@@ -198,6 +198,38 @@ class TestHandlerReturnsValidJsonProperty:
 class TestNormalizeDescriptors:
     """Unit tests for `_normalize_descriptors`'s DD-5 default/drop behavior."""
 
+    def test_duplicate_repo_ids_both_survive(self):
+        """The function does not de-duplicate: it appends every descriptor
+        that survives defaulting and the drop conditions.
+
+        Pinned deterministically because a property test used to index the
+        output by repoId, which collapsed two entries sharing one repoId and
+        produced a false failure. In production repoId is a per-repository
+        uuid4 slice so collisions do not occur, but this function is
+        documented as tolerant of whatever an older backend build sends, so
+        the behaviour is asserted rather than assumed.
+        """
+        repos = [
+            {
+                "repoId": "aaaaaaaa",
+                "provider": "github",
+                "owner": "acme",
+                "repo": "billing",
+                "gitUsername": "alice",
+            },
+            {
+                "repoId": "aaaaaaaa",
+                "provider": "github",
+                "owner": "acme",
+                "repo": "invoicing",
+                "gitUsername": "alice",
+            },
+        ]
+        result = _normalize_descriptors(repos, fallback_username="")
+
+        assert len(result) == 2
+        assert [entry["repo"] for entry in result] == ["billing", "invoicing"]
+
     def test_missing_provider_defaults_to_github(self):
         repos = [{"repoId": "aaaaaaaa", "owner": "acme", "repo": "billing", "gitUsername": "alice"}]
         result = _normalize_descriptors(repos, fallback_username="")

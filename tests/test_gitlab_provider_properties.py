@@ -2799,23 +2799,33 @@ class TestProperty13ProviderDispatchTotality:
             and entry.get("gitUsername")
         ]
 
-        result_by_repo_id = {
-            entry.get("repoId"): entry for entry in result if entry.get("repoId") is not None
-        }
+        # Deliberately NOT indexed by repoId. `_normalize_descriptors` does
+        # not de-duplicate — it appends every surviving descriptor — so two
+        # input entries may legitimately share a repoId. A dict keyed by
+        # repoId would keep only the last of them and then compare the
+        # first input against the wrong output entry. In production repoId
+        # is a per-repository uuid4 slice and collisions do not occur, but
+        # this function is documented as tolerant of whatever an older
+        # backend build sends, so the property must not depend on it.
+        surviving_identities = [
+            (
+                _p13_identifying_fields(entry),
+                entry.get("gitUsername"),
+            )
+            for entry in result
+        ]
 
         for input_entry in already_valid_inputs:
-            repo_id = input_entry.get("repoId")
-            assert repo_id in result_by_repo_id, (
-                "An already-valid input descriptor was dropped by "
+            expected = (
+                _p13_identifying_fields(input_entry),
+                # gitUsername was already non-empty, so it must not have
+                # been overridden by the fallback.
+                input_entry["gitUsername"],
+            )
+            assert expected in surviving_identities, (
+                "An already-valid input descriptor was dropped or altered by "
                 "normalization: %r" % (input_entry,)
             )
-            output_entry = result_by_repo_id[repo_id]
-            expected = _p13_identifying_fields(input_entry)
-            for key, value in expected.items():
-                assert output_entry[key] == value
-            # gitUsername was already non-empty, so it must not have been
-            # overridden by the fallback.
-            assert output_entry["gitUsername"] == input_entry["gitUsername"]
 
 
 # ----------------------------------------------------------------------
