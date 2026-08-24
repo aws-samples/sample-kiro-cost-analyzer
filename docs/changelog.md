@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+### Feature — Validate Git token permissions from the Settings page
+
+- The Git settings page gains a "Validate permissions" action in two places: in the add/edit repository form (probing a token before it is saved) and as a per-row action on the repositories table (probing the token already stored in SSM). Each validation exercises the three provider operations the correlation agent actually depends on — repository metadata, commits, and pull/merge requests — and reports them independently, so a token that reads metadata but not contents is diagnosed as exactly that. When something is missing, a modal lists the permissions to grant in one shape for both providers, with the permission identifier in code type and the access level emphasised (GitHub: `Metadata`, `Contents`, `Pull requests` read-only, plus the classic `repo` scope alternative; GitLab: the `read_api` and `read_repository` scopes, plus the minimum `Reporter` project role).
+- Closes a real diagnosis gap: a repository registered with a fine-grained PAT limited to "administration and metadata" showed a green "Token configured" indicator, ran correlation without error, and silently never appeared in any result. Finding the cause required reading the AgentCore runtime's CloudWatch logs for a `403` on the commits endpoint.
+- GitLab scopes are reported per operation rather than collapsed into `read_api`. Live-probing a restricted token showed `read_api` alone is not sufficient: it returned 200 on merge requests while returning 403 on commits, because repository content is gated by `read_repository`. Collapsing would have told the user to grant a scope they already had.
+- The GitLab path resolves the instance hostname and refuses loopback, link-local, private, reserved, and multicast addresses before opening a socket, so a user-supplied base URL cannot be used to reach the instance metadata endpoint from the backend Lambda. GitHub requests always go to the pinned `api.github.com` host. Tokens are never logged, echoed, or persisted by the validation path. Spec: `.kiro/specs/git-token-permission-validation/`.
+
 ## v3.6.1 — ETL Parse Payload Size Fix (2026-08-23)
 
 ### Fix — ETL `Parse` no longer exceeds the Step Functions 256KB Task payload limit

@@ -11,6 +11,12 @@ repository-scoped access token is fetched lazily on the first call for a
 given `repo_id` and memoized in a `dict[str, str]` cache keyed by
 `repo_id`, so a GitLab-only analysis never reads a GitHub token and vice
 versa, and repeated calls for the same repository skip SSM.
+
+The set of operations called here is MIRRORED by the check table in
+`backend/handlers/git_token_validation_handler.py`, which is what the
+Settings page's "Validate permissions" action probes. If you add an
+operation to this tool, add a matching check there too — otherwise
+validation reports a green token that this tool then fails on.
 """
 
 from __future__ import annotations

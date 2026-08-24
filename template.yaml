@@ -1840,6 +1840,18 @@ Resources:
             RestApiId: !Ref ApiGateway
             Path: /api/git/repos/{repoId}/sync
             Method: POST
+        GitRepoValidateToken:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/git/repos/validate-token
+            Method: POST
+        GitRepoValidateStoredToken:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/git/repos/{repoId}/validate-token
+            Method: POST
         GitMappingsPost:
           Type: Api
           Properties:

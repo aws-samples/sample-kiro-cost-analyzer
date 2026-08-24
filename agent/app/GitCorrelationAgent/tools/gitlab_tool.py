@@ -13,6 +13,12 @@ versa, and repeated calls for the same repository skip SSM.
 
 Authentication uses the `PRIVATE-TOKEN` header, never `Authorization`.
 
+The set of operations called here is MIRRORED by the check table in
+`backend/handlers/git_token_validation_handler.py`, which is what the
+Settings page's "Validate permissions" action probes. If you add an
+operation to this tool, add a matching check there too — otherwise
+validation reports a green token that this tool then fails on.
+
 Author filtering is deliberately belt-and-braces:
 
 - Commits: GitLab's `author` query parameter arrived in GitLab 15.10 and

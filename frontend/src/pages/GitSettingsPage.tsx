@@ -11,6 +11,7 @@ import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import FormField from '@cloudscape-design/components/form-field';
 import GitRepoForm from '../components/GitRepoForm';
 import GitMappingForm from '../components/GitMappingForm';
+import GitTokenValidationModal from '../components/GitTokenValidationModal';
 import { useAuth } from '../auth/useAuth';
 import { useI18n } from '../i18n/useI18n';
 import { get, ApiError } from '../api/client';
@@ -19,13 +20,20 @@ import {
   createGitRepo,
   updateGitRepo,
   deleteGitRepo,
+  validateStoredGitToken,
   listGitMappings,
   listAllGitMappings,
   createGitMapping,
   deleteGitMapping,
   type GitRepoPatch,
 } from '../api/gitApi';
-import type { GitRepository, GitUserMapping, GitMappingCreated, UsageResponse } from '../types';
+import type {
+  GitRepository,
+  GitUserMapping,
+  GitMappingCreated,
+  GitTokenValidation,
+  UsageResponse,
+} from '../types';
 
 export default function GitSettingsPage() {
   const { user } = useAuth();
@@ -40,6 +48,31 @@ export default function GitSettingsPage() {
   const [repoDeleteTarget, setRepoDeleteTarget] = useState<GitRepository | null>(null);
   const [deletingRepo, setDeletingRepo] = useState(false);
   const [repoEditTarget, setRepoEditTarget] = useState<GitRepository | null>(null);
+
+  const [validatingRepoId, setValidatingRepoId] = useState<string | null>(null);
+  const [validationResult, setValidationResult] = useState<GitTokenValidation | null>(null);
+
+  async function handleValidateStored(repo: GitRepository) {
+    if (validatingRepoId !== null) return;
+    setValidatingRepoId(repo.repoId);
+    setRepoError(null);
+    setRepoSuccess(null);
+    setValidationResult(null);
+    try {
+      const result = await validateStoredGitToken(repo.repoId);
+      if (result.overall === 'ok') {
+        setRepoSuccess(t('gitTokenValidation.summary.ok'));
+      } else {
+        setValidationResult(result);
+      }
+    } catch (err) {
+      setRepoError(
+        err instanceof Error ? err.message : t('gitTokenValidation.error.generic'),
+      );
+    } finally {
+      setValidatingRepoId(null);
+    }
+  }
 
   const [mappings, setMappings] = useState<GitUserMapping[]>([]);
   const [mappingsLoading, setMappingsLoading] = useState(false);
@@ -232,11 +265,19 @@ export default function GitSettingsPage() {
               header: t('gitSettings.repos.header.actions'),
               cell: (item) => (
                 <SpaceBetween size="xxs" direction="horizontal">
+                  <Button
+                    iconName="security"
+                    variant="icon"
+                    loading={validatingRepoId === item.repoId}
+                    disabled={validatingRepoId !== null}
+                    onClick={() => handleValidateStored(item)}
+                    ariaLabel={t('gitTokenValidation.button.validate')}
+                  />
                   <Button iconName="edit" variant="icon" onClick={() => setRepoEditTarget(item)} ariaLabel={t('gitSettings.repos.action.edit')} />
                   <Button iconName="remove" variant="icon" onClick={() => setRepoDeleteTarget(item)} ariaLabel={t('gitSettings.repos.action.remove')} />
                 </SpaceBetween>
               ),
-              width: 110,
+              width: 140,
             },
           ]}
           items={repos}
@@ -248,6 +289,11 @@ export default function GitSettingsPage() {
           onDismiss={() => { setShowRepoForm(false); setRepoEditTarget(null); }}
           onSubmit={repoEditTarget ? handleUpdateRepo : handleCreateRepo}
           editTarget={repoEditTarget}
+        />
+
+        <GitTokenValidationModal
+          result={validationResult}
+          onDismiss={() => setValidationResult(null)}
         />
 
         {mappingError && <Alert type="error" dismissible onDismiss={() => setMappingError(null)}>{mappingError}</Alert>}

@@ -22,6 +22,7 @@ from handlers import (
     export_handler,
     git_mapping_handler,
     git_repo_handler,
+    git_token_validation_handler,
     prompts_handler,
     recommendation_handler,
     usage_handler,
@@ -54,6 +55,8 @@ _PROMPT_DETAIL_PATTERN = re.compile(r"^/api/prompts/([^/]+)$")
 
 # Git endpoint patterns
 _GIT_REPO_SYNC_PATTERN = re.compile(r"^/api/git/repos/([^/]+)/sync$")
+_GIT_REPO_VALIDATE_TOKEN_PATTERN = re.compile(r"^/api/git/repos/([^/]+)/validate-token$")
+_GIT_REPO_VALIDATE_TOKEN_PATH = "/api/git/repos/validate-token"
 _GIT_REPO_DETAIL_PATTERN = re.compile(r"^/api/git/repos/([^/]+)$")
 _GIT_MAPPING_DELETE_PATTERN = re.compile(r"^/api/git/mappings/([^/]+)/([^/]+)$")
 _GIT_MAPPING_USER_PATTERN = re.compile(r"^/api/git/mappings/([^/]+)$")
@@ -543,6 +546,33 @@ def _route(http_method: str, path: str, query_params: dict, body: dict, claims: 
             })
         result = git_repo_handler.handle_list_repos()
         return _build_response(200, result)
+
+    # POST /api/git/repos/validate-token — validate a token before it is saved.
+    # Must be matched before the {repoId} patterns below so "validate-token" is
+    # never parsed as a repository id.
+    if http_method == "POST" and path == _GIT_REPO_VALIDATE_TOKEN_PATH:
+        if not _is_admin(claims):
+            return _build_response(403, {
+                "error": "Forbidden",
+                "message": "Access restricted to administrators",
+            })
+        result = git_token_validation_handler.handle_validate_token(body)
+        status_code = result.pop("_status_code", 200) if isinstance(result, dict) else 200
+        return _build_response(status_code, result)
+
+    # POST /api/git/repos/{repoId}/validate-token — validate the stored token
+    if http_method == "POST":
+        match = _GIT_REPO_VALIDATE_TOKEN_PATTERN.match(path)
+        if match:
+            if not _is_admin(claims):
+                return _build_response(403, {
+                    "error": "Forbidden",
+                    "message": "Access restricted to administrators",
+                })
+            repo_id = match.group(1)
+            result = git_token_validation_handler.handle_validate_stored_token(repo_id)
+            status_code = result.pop("_status_code", 200) if isinstance(result, dict) else 200
+            return _build_response(status_code, result)
 
     # POST /api/git/repos/{repoId}/sync — manual sync (must match before DELETE)
     if http_method == "POST":
