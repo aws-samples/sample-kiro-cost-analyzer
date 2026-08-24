@@ -80,34 +80,66 @@ describe('GitTokenValidationModal', () => {
     expect(screen.queryByText(/HTTP/)).toBeNull();
   });
 
-  it('shows both GitHub token-type remediations, with colons slugified into keys', () => {
+  it('renders the same remediation shape for GitHub, with name and level split', () => {
     render(<GitTokenValidationModal result={build()} onDismiss={() => {}} />);
 
-    expect(screen.getByText('gitTokenValidation.remediation.github.fineGrained')).toBeTruthy();
-    // A user holding a classic PAT cannot act on fine-grained instructions,
-    // so both paths must always be present.
-    expect(screen.getByText('gitTokenValidation.remediation.github.classic')).toBeTruthy();
+    expect(screen.getByText('gitTokenValidation.remediation.intro.github')).toBeTruthy();
     // "contents:read" must become "contents_read" — i18next would otherwise
     // read the colon as a namespace separator.
-    expect(screen.getByText('gitTokenValidation.permission.contents_read')).toBeTruthy();
-    expect(screen.getByText('gitTokenValidation.permission.pull_requests_read')).toBeTruthy();
+    expect(screen.getByText('gitTokenValidation.permission.contents_read.name')).toBeTruthy();
+    expect(screen.getByText('gitTokenValidation.permission.pull_requests_read.name')).toBeTruthy();
+    // The level is emphasised separately from the identifier.
+    expect(
+      screen.getAllByText('gitTokenValidation.permission.contents_read.level').length,
+    ).toBeGreaterThan(0);
+    // A user holding a classic PAT cannot act on fine-grained instructions,
+    // so the alternative is always present.
+    expect(screen.getByText('gitTokenValidation.remediation.note.github.term')).toBeTruthy();
   });
 
-  it('shows the GitLab scope remediation instead for a GitLab repository', () => {
+  it('renders that identical shape for GitLab too, not a wall of prose', () => {
     const result = build({
       provider: 'gitlab',
       overall: 'failed',
       checks: [
         { id: 'repo_access', status: 'forbidden', httpStatus: 403 },
         { id: 'commits', status: 'forbidden', httpStatus: 403 },
-        { id: 'pull_requests', status: 'forbidden', httpStatus: 403 },
+        { id: 'pull_requests', status: 'ok', httpStatus: 200 },
       ],
-      requiredPermissions: ['read_api'],
+      requiredPermissions: ['read_api', 'read_repository'],
     });
     render(<GitTokenValidationModal result={result} onDismiss={() => {}} />);
 
-    expect(screen.getByText('gitTokenValidation.remediation.gitlab')).toBeTruthy();
-    expect(screen.queryByText('gitTokenValidation.remediation.github.fineGrained')).toBeNull();
+    expect(screen.getByText('gitTokenValidation.remediation.intro.gitlab')).toBeTruthy();
+    // The permission list is present for GitLab as well — the earlier
+    // revision collapsed GitLab into a single paragraph with no list,
+    // which is what made the two providers look like different features.
+    expect(screen.getByText('gitTokenValidation.permission.read_api.name')).toBeTruthy();
+    expect(screen.getByText('gitTokenValidation.permission.read_repository.name')).toBeTruthy();
+    expect(screen.getByText('gitTokenValidation.remediation.note.gitlab.term')).toBeTruthy();
+    expect(screen.queryByText('gitTokenValidation.remediation.intro.github')).toBeNull();
+  });
+
+  it('renders GitHub permissions as list rows, not prose', () => {
+    render(<GitTokenValidationModal result={build()} onDismiss={() => {}} />);
+
+    // Cloudscape renders Modal into a portal, so query by role rather than
+    // through the render container.
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+  });
+
+  it('renders GitLab permissions as list rows too, with the same structure', () => {
+    render(
+      <GitTokenValidationModal
+        result={build({ provider: 'gitlab', requiredPermissions: ['read_api'] })}
+        onDismiss={() => {}}
+      />,
+    );
+
+    // The earlier revision collapsed GitLab into a single paragraph with no
+    // list, which is what made the two providers look like different
+    // features. One row per permission, same as GitHub.
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
   });
 
   it('omits the remediation block entirely when nothing needs granting', () => {

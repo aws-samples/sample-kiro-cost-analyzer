@@ -17,9 +17,14 @@ interface GitTokenValidationModalProps {
 /**
  * i18next treats ":" as a namespace separator, so a permission identifier
  * like "contents:read" cannot be interpolated into a key as-is. Slugify it.
+ *
+ * Each permission carries two sub-keys: `name` is the provider's own literal
+ * label (identical in every locale, like a brand string) and `level` is the
+ * translated access level to grant.
  */
-function permissionKey(permission: string): TranslationKey {
-  return `gitTokenValidation.permission.${permission.replace(/:/g, '_')}` as TranslationKey;
+function permissionKey(permission: string, part: 'name' | 'level'): TranslationKey {
+  const slug = permission.replace(/:/g, '_');
+  return `gitTokenValidation.permission.${slug}.${part}` as TranslationKey;
 }
 
 /**
@@ -91,23 +96,53 @@ export default function GitTokenValidationModal({
         {result.requiredPermissions.length > 0 && (
           <Box>
             <Box variant="h4">{t('gitTokenValidation.remediation.title')}</Box>
-            {result.provider === 'github' ? (
-              <SpaceBetween size="xs">
-                <Box variant="p">
-                  {t('gitTokenValidation.remediation.github.fineGrained')}
-                </Box>
-                <ul>
-                  {result.requiredPermissions.map((permission) => (
-                    <li key={permission}>{t(permissionKey(permission))}</li>
-                  ))}
-                </ul>
-                <Box variant="p">
-                  {t('gitTokenValidation.remediation.github.classic')}
-                </Box>
-              </SpaceBetween>
-            ) : (
-              <Box variant="p">{t('gitTokenValidation.remediation.gitlab')}</Box>
-            )}
+            <SpaceBetween size="s">
+              <Box variant="p">
+                {t(
+                  result.provider === 'github'
+                    ? 'gitTokenValidation.remediation.intro.github'
+                    : 'gitTokenValidation.remediation.intro.gitlab',
+                )}
+              </Box>
+
+              {/* Same shape for every provider: one row per permission, the
+                  identifier in code type and the level in bold, so the two
+                  things the user must act on are the two things that stand
+                  out. */}
+              <ul>
+                {result.requiredPermissions.map((permission) => (
+                  <li key={permission}>
+                    <Box variant="code" display="inline">
+                      {t(permissionKey(permission, 'name'))}
+                    </Box>
+                    {' — '}
+                    <Box variant="strong" display="inline">
+                      {t(permissionKey(permission, 'level'))}
+                    </Box>
+                  </li>
+                ))}
+              </ul>
+
+              <Box variant="p">
+                {t(
+                  result.provider === 'github'
+                    ? 'gitTokenValidation.remediation.note.github.prefix'
+                    : 'gitTokenValidation.remediation.note.gitlab.prefix',
+                )}{' '}
+                <Box variant="code" display="inline">
+                  {t(
+                    result.provider === 'github'
+                      ? 'gitTokenValidation.remediation.note.github.term'
+                      : 'gitTokenValidation.remediation.note.gitlab.term',
+                  )}
+                </Box>{' '}
+                {t(
+                  result.provider === 'github'
+                    ? 'gitTokenValidation.remediation.note.github.suffix'
+                    : 'gitTokenValidation.remediation.note.gitlab.suffix',
+                )}
+              </Box>
+            </SpaceBetween>
           </Box>
         )}
       </SpaceBetween>
