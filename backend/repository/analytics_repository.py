@@ -47,6 +47,36 @@ def _coerce_bilingual_insights(raw) -> dict:
     return {"en": [], "pt-BR": []}
 
 
+def aggregate_user_summary(users: list[dict]) -> dict:
+    """Aggregate the usage summary over an entire (already filtered) user list.
+
+    Pure function (no I/O) so it can be exhaustively property-tested. The
+    input is the fully-aggregated, filter-applied list of per-user dicts —
+    NOT a paginated page — so the resulting summary is invariant to the
+    ``limit``/``next_token`` pagination applied afterwards.
+
+    Args:
+        users: List of aggregated user dicts, each with ``totalCredits`` and
+            ``overageCredits`` (missing values default to 0).
+
+    Returns:
+        Dict with ``totalUsers``, ``totalCredits``, ``totalOverageCredits``
+        and ``averageCreditsPerUser`` (rounded to 2 decimals; 0 when there
+        are no users).
+    """
+    total_users = len(users)
+    total_credits = round(sum(float(u.get("totalCredits", 0)) for u in users), 2)
+    total_overage = round(sum(float(u.get("overageCredits", 0)) for u in users), 2)
+    return {
+        "totalUsers": total_users,
+        "totalCredits": total_credits,
+        "totalOverageCredits": total_overage,
+        "averageCreditsPerUser": (
+            round(total_credits / total_users, 2) if total_users > 0 else 0
+        ),
+    }
+
+
 class AnalyticsRepository:
     """Encapsulates all DynamoDB read operations for the Analytics_Table.
 
@@ -428,8 +458,12 @@ class AnalyticsRepository:
             start_date: Optional start date (YYYY-MM-DD) for filtering daily stats.
             end_date: Optional end date (YYYY-MM-DD) for filtering daily stats.
 
-        Returns a dict with ``users`` (list of aggregated user dicts),
-        ``nextToken`` for cursor-based pagination, and ``scannedCount``.
+        Returns a dict with ``users`` (list of aggregated user dicts for the
+        current page), ``nextToken`` for cursor-based pagination,
+        ``scannedCount``, and ``summary`` (aggregated over the entire filtered
+        population — ``totalUsers``, ``totalCredits``, ``totalOverageCredits``,
+        ``averageCreditsPerUser`` — and therefore invariant to ``limit`` and
+        ``next_token``).
         """
         # Build filter expression with optional date range
         filter_expr = Attr("SK").begins_with("STATS#DAILY#")
@@ -509,6 +543,12 @@ class AnalyticsRepository:
         # Sort by totalCredits descending for consistent ordering
         users.sort(key=lambda u: u["totalCredits"], reverse=True)
 
+        # Aggregate the summary over the ENTIRE filtered population, before
+        # pagination. This makes the summary invariant to ``limit`` and
+        # ``next_token`` — the previous behavior of summarizing only the
+        # returned page capped the headline metrics at the page size.
+        summary = aggregate_user_summary(users)
+
         # Cursor-based pagination over the fully-aggregated list
         start_index = 0
         if next_token:
@@ -529,6 +569,7 @@ class AnalyticsRepository:
             "users": self._convert_decimals(page),
             "nextToken": result_next_token,
             "scannedCount": scanned_count,
+            "summary": summary,
         }
 
     # ------------------------------------------------------------------

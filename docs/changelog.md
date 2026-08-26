@@ -4,6 +4,15 @@
 
 ## Unreleased
 
+### Fix — Dashboard "Total Users" and summary no longer capped at the page size
+
+- **Bug** — the Users tab "Summary" block was capped at 50. An account with more active users (e.g. a customer with 127 Kiro subscriptions) always saw `Total Users: 50`, and the credit/overage totals were likewise truncated to the first page.
+- **Root cause** — `GET /api/usage` returns at most one 50-row page (`usage_handler.py` caps `limit` at 50) and computed the whole summary from that page via `_compute_summary(page)`. The repository already scans the entire table and aggregates every user, but the aggregated totals were never returned — only the page and a `nextToken`.
+- **Fix** — `AnalyticsRepository.scan_user_stats` now computes the summary over the entire filtered population (via a new pure `aggregate_user_summary` helper) and returns it under a `summary` key, invariant to `limit`/`nextToken`. `usage_handler.handle_usage` consumes `result["summary"]` (falling back to the page-derived summary only for older repository doubles) and forwards `startDate`/`endDate` so the summary respects the date window. The paginated `users` list, the response schema, and the frontend are unchanged; the `SummaryCards` component already renders the value with no client-side cap. No additional DynamoDB scan is introduced.
+- **Scope** — this reports the true count of **active** users (users with ingested activity). Reporting the total number of paid **licenses/subscriptions** (including seats that never generated activity) requires ingesting the subscription roster and is out of scope; see `.kiro/specs/dashboard-active-user-count/` (Out of Scope).
+- **Tests** — new `tests/test_analytics_repository.py` covers the pure aggregation (unit + Hypothesis property tests for count totality, total conservation, and average coherence) and `scan_user_stats` end to end (count beyond the page cap, pagination invariance, tier- and date-scoped summaries). `tests/test_usage_handler.py` gains a `TestSummaryReflectsFullPopulation` class (60-user count > 50 while the page stays 50, cross-page invariance, date-range forwarding, and the fallback path). `frontend/src/components/SummaryCards.test.tsx` asserts a count above 50 renders unchanged.
+- **Spec** — `.kiro/specs/dashboard-active-user-count/` documents the requirements, design, correctness properties, and the deferred "total licenses" work.
+
 ### Feature — ETL execution history
 
 - The Settings ETL tab gains an execution history table covering the trailing 5 days, with start date, end date, elapsed time, file count and status. New admin endpoint `GET /api/etl/executions?days=N` (`days` defaults to 5, clamped to 1..30).
