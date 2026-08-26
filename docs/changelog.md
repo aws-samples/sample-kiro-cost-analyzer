@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## v3.8 — ETL Execution History & Full-Population Dashboard Summary (2026-08-26)
+
 ### Fix — Dashboard "Total Users" and summary no longer capped at the page size
 
 - **Bug** — the Users tab "Summary" block was capped at 50. An account with more active users (e.g. a customer with 127 Kiro subscriptions) always saw `Total Users: 50`, and the credit/overage totals were likewise truncated to the first page.
