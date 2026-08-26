@@ -218,6 +218,8 @@ def handle_usage(query_params: dict, dynamodb_resource=None) -> dict:
         limit=limit,
         next_token=next_token,
         subscription_tier=subscription_tier,
+        start_date=query_params.get("startDate"),
+        end_date=query_params.get("endDate"),
     )
 
     users = [_format_user(u) for u in result.get("users", [])]
@@ -250,7 +252,11 @@ def handle_usage(query_params: dict, dynamodb_resource=None) -> dict:
                 u["daysSinceLastActive"] = (today - date.fromisoformat(last_active)).days
             # else: fields remain None (set in _format_user)
 
-    summary = _compute_summary(users)
+    # The authoritative summary is aggregated by the repository over the
+    # entire filtered population (invariant to pagination). Fall back to a
+    # page-derived summary only when the repository does not provide one
+    # (e.g. older test doubles), preserving backward compatibility.
+    summary = result.get("summary") or _compute_summary(users)
 
     period: dict = {}
     if query_params.get("startDate"):

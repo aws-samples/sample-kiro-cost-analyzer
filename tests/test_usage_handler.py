@@ -2,6 +2,7 @@
 
 import os
 from decimal import Decimal
+from unittest.mock import patch
 
 import boto3
 import pytest
@@ -544,3 +545,115 @@ class TestUserMetadataDisplayNameFallback:
         assert result["u-unresolved"]["displayName"] == "jdoe"  # fallback applied
         assert result["u-resolved"]["displayName"] == "Jane Doe"  # unchanged
         assert result["u-empty"]["displayName"] == ""  # Req 1.3: may stay empty
+
+
+class TestSummaryReflectsFullPopulation:
+    """The summary block must reflect the entire filtered population, not the
+    50-row page (dashboard-active-user-count spec)."""
+
+    @mock_aws
+    def test_total_users_exceeds_page_cap_end_to_end(self):
+        """With 60 active users, summary.totalUsers is 60 while the page stays 50."""
+        resource = boto3.resource("dynamodb", region_name="us-east-1")
+        resource.create_table(
+            TableName=TABLE_NAME,
+            KeySchema=[
+                {"AttributeName": "PK", "KeyType": "HASH"},
+                {"AttributeName": "SK", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "PK", "AttributeType": "S"},
+                {"AttributeName": "SK", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        table = resource.Table(TABLE_NAME)
+
+        for i in range(60):
+            _put_daily_stat(table, f"user-{i:03d}", "2026-04-10", 10.0 * (i + 1))
+
+        os.environ["ANALYTICS_TABLE"] = TABLE_NAME
+
+        result = handle_usage({}, dynamodb_resource=resource)
+
+        assert result["summary"]["totalUsers"] == 60
+        assert len(result["users"]) == 50
+        assert result.get("nextToken") is not None
+
+    @mock_aws
+    def test_summary_invariant_between_pages_end_to_end(self):
+        """Summary is identical on page 1 and the page reached via nextToken."""
+        resource = boto3.resource("dynamodb", region_name="us-east-1")
+        resource.create_table(
+            TableName=TABLE_NAME,
+            KeySchema=[
+                {"AttributeName": "PK", "KeyType": "HASH"},
+                {"AttributeName": "SK", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "PK", "AttributeType": "S"},
+                {"AttributeName": "SK", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        table = resource.Table(TABLE_NAME)
+
+        for i in range(60):
+            _put_daily_stat(table, f"user-{i:03d}", "2026-04-10", 10.0 * (i + 1))
+
+        os.environ["ANALYTICS_TABLE"] = TABLE_NAME
+
+        page1 = handle_usage({}, dynamodb_resource=resource)
+        page2 = handle_usage(
+            {"nextToken": page1["nextToken"]}, dynamodb_resource=resource
+        )
+
+        assert page1["summary"] == page2["summary"]
+        assert page1["summary"]["totalUsers"] == 60
+
+    def test_forwards_date_range_to_repository(self, monkeypatch):
+        """handle_usage forwards startDate/endDate so the summary respects the window."""
+        monkeypatch.delenv("USER_NAMES_TABLE", raising=False)
+        monkeypatch.setenv("ANALYTICS_TABLE", TABLE_NAME)
+
+        with patch("backend.handlers.usage_handler.AnalyticsRepository") as MockRepo:
+            repo = MockRepo.return_value
+            repo.scan_user_stats.return_value = {
+                "users": [],
+                "nextToken": None,
+                "summary": {
+                    "totalUsers": 0,
+                    "totalCredits": 0,
+                    "totalOverageCredits": 0,
+                    "averageCreditsPerUser": 0,
+                },
+            }
+
+            handle_usage({"startDate": "2026-04-01", "endDate": "2026-04-30"})
+
+            kwargs = repo.scan_user_stats.call_args.kwargs
+            assert kwargs["start_date"] == "2026-04-01"
+            assert kwargs["end_date"] == "2026-04-30"
+
+    def test_falls_back_to_page_summary_when_repo_omits_summary(self, monkeypatch):
+        """Defensive: an older repository double without a 'summary' key still works."""
+        monkeypatch.delenv("USER_NAMES_TABLE", raising=False)
+        monkeypatch.setenv("ANALYTICS_TABLE", TABLE_NAME)
+
+        with patch("backend.handlers.usage_handler.AnalyticsRepository") as MockRepo:
+            repo = MockRepo.return_value
+            repo.scan_user_stats.return_value = {
+                "users": [
+                    {"userId": "u1", "totalCredits": 100.0, "overageCredits": 10.0, "daysActive": 1},
+                    {"userId": "u2", "totalCredits": 200.0, "overageCredits": 0.0, "daysActive": 1},
+                ],
+                "nextToken": None,
+                # No "summary" key — simulates the pre-fix repository contract.
+            }
+            repo.batch_get_activity_summaries.return_value = {}
+
+            result = handle_usage({})
+
+        assert result["summary"]["totalUsers"] == 2
+        assert result["summary"]["totalCredits"] == 300.0
+        assert result["summary"]["totalOverageCredits"] == 10.0

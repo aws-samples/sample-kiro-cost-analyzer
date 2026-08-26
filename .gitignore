@@ -71,3 +71,7 @@ CLAUDE.md
 # draw.io editor backups
 *.drawio.bkp
 .$*.drawio.bkp
+
+# Local, environment-specific helpers (not part of the sample)
+docs/deploy-walkthrough.md
+scripts/setup-prompt-replication.sh
