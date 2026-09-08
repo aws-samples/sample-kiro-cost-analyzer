@@ -1,0 +1,92 @@
+name: CI
+
+# Runs the test suites that already exist in the repository on every proposed
+# change. Adds no tests and changes none.
+#
+# Spec: .kiro/specs/ci-test-workflow/
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Read-only. This workflow must not be able to write to the repository, and
+# `pull_request` (never `pull_request_target`) means fork code runs without
+# access to the base repository's token or secrets.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    env:
+      # Not credentials. botocore resolves a region and a credential pair
+      # before moto intercepts the call, and on a runner there is no
+      # ~/.aws/config to resolve them from, so ~30 tests fail with
+      # NoRegionError without these. The values are deliberately fake and the
+      # suite reaches no real AWS endpoint.
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
+      AWS_SESSION_TOKEN: testing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Must equal the Runtime declared in template.yaml Globals.
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      # Runs from the repository root on purpose: conftest.py builds sys.path
+      # relative to itself so the tests import the way Lambda does.
+      - name: Run backend and ETL suite
+        run: python -m pytest tests/ -q
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      # Read by src/auth/AuthProvider.tsx at module load. Without them three
+      # test files fail to import. Cognito pool and client ids are not secrets
+      # and these are placeholders regardless.
+      VITE_COGNITO_USER_POOL_ID: us-east-1_TESTPOOL
+      VITE_COGNITO_CLIENT_ID: testclientid1234567890
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # >= 22.6 is required: check:locales runs the TypeScript entrypoint
+          # scripts/check-locales.ts through `node --experimental-strip-types`.
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      # Chains check:locales (catalog parity, sort order, non-empty values)
+      # and `tsc -b`, which is the only type-check in this job.
+      - name: Build
+        run: npm run build

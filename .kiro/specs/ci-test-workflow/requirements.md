@@ -41,15 +41,17 @@ Closing both gaps requires no new tests and no change to any existing test. Ever
 
 2.1. THE repository SHALL provide a single test dependency manifest that, when installed, satisfies every import in `tests/`.
 
-2.2. THE manifest SHALL obtain runtime dependencies by reference to the existing deploy manifests rather than by restating their contents, so that a version bump in a deploy manifest cannot silently diverge from what CI installs.
+2.2. THE manifest SHALL obtain runtime dependencies by reference to the existing deploy manifests wherever those references resolve together, and SHALL restate a pin only where referencing them is unsatisfiable, with the reason recorded in `design.md`.
 
-2.3. THE manifest SHALL reference every deploy manifest whose packages `tests/` imports, including the agent's.
+2.3. THE manifest SHALL provide every package that `tests/` imports at collection time, including those owned by the agent's deploy manifest.
 
 2.4. THE manifest SHALL pin an exact version for each test-only dependency.
 
-2.5. WHEN the manifest is installed into an empty virtual environment on a fresh clone THEN the backend gate SHALL pass with no further manual step.
+2.5. WHEN the manifest is installed into an empty virtual environment on a fresh clone THEN `pytest` SHALL collect every module in `tests/` with zero collection errors, with no further manual step.
 
-2.6. THE manifest SHALL NOT be the place where any Lambda runtime dependency is first introduced; each of those remains owned by its deploy manifest.
+2.6. THE manifest SHALL NOT introduce a Lambda runtime dependency that no deploy manifest already declares.
+
+> **Amended after validation.** 2.2 and 2.3 originally required referencing all three deploy manifests and restating nothing. That is unsatisfiable: `backend/` and `etl/` pin `boto3==1.43.4` while the agent's `bedrock-agentcore==1.19.0` requires `boto3>=1.43.31`, and `pip` exits with `ResolutionImpossible`. See `design.md` §2.1. 2.5 originally required the suite to *pass*; it does not, for reasons that predate this spec and are recorded in `design.md` §5, so the criterion is now about collection, which is what this manifest controls.
 
 ## Requirement 3: The backend gate matches the deployed runtime
 
@@ -81,6 +83,10 @@ Closing both gaps requires no new tests and no change to any existing test. Ever
 
 4.5. IF the catalogs `en.json` and `pt-BR.json` diverge in key set, sort order, or contain an empty value THEN the frontend gate SHALL fail.
 
+4.6. THE frontend gate SHALL supply placeholder values for the Cognito pool and client identifiers the application reads at module load, so that test files importing the auth provider can be collected.
+
+> **Amended after validation.** 4.3 is currently unsatisfiable through no fault of the workflow: the `test` script is `NODE_OPTIONS=--no-webstorage vitest --run`, and `--no-webstorage` exists in no Node release, so the script exits 9 on every version. The workflow still invokes it, so the defect is visible rather than hidden; fixing `package.json` is out of scope here. 4.6 was added because three test files fail to import without it. See `design.md` §3.3, §3.4 and §5.
+
 ## Requirement 5: The workflow holds no privilege and no credential
 
 **User Story.** As a maintainer of an `aws-samples` repository, I want the CI workflow to be incapable of writing to the repository or reaching an AWS account, so that it cannot be turned into an escalation path by a pull request from a fork.
@@ -91,11 +97,13 @@ Closing both gaps requires no new tests and no change to any existing test. Ever
 
 5.2. THE workflow SHALL NOT create, approve, comment on, or label a pull request or an issue.
 
-5.3. THE workflow SHALL NOT reference any repository secret and SHALL NOT configure AWS credentials.
+5.3. THE workflow SHALL NOT reference any repository secret and SHALL NOT configure a real AWS credential. IF the suite requires AWS environment variables to construct a client THEN the workflow SHALL supply literal placeholder values in plain text.
 
-5.4. THE suite SHALL remain hermetic under CI, reaching no real AWS endpoint.
+5.4. THE suite SHALL reach no real AWS endpoint and no network host under CI.
 
 5.5. THE workflow SHALL NOT execute any code from a pull request in a context that has write access to the repository.
+
+> **Amended after validation.** 5.4 originally asserted the suite was hermetic in the sense of self-contained. It is not: `botocore` resolves a region and a credential pair at client construction, before `moto` intercepts, and a runner has no `~/.aws/config`. Without placeholders 35 tests fail with `NoRegionError`. The suite is *offline* but not *self-contained*, and one test is not even offline-safe — see `design.md` §3.2 and §5.
 
 ## Requirement 6: The local gates are documented
 
@@ -114,6 +122,8 @@ Closing both gaps requires no new tests and no change to any existing test. Ever
 ## Out of scope
 
 - Writing new tests or modifying existing ones. This spec only executes what the repository already contains.
+- Fixing the pre-existing defects that running the gates reveals — 4 clock-dependent backend tests, 1 non-hermetic backend test, the unrunnable `test` script, 4 pt-BR frontend failures, and 42 lint errors. All are enumerated in `design.md` §5 and each warrants its own issue. **CI therefore lands red**, which is the accurate signal, not a regression.
+- Aligning the `boto3` pin across the three deploy manifests, which would let the dev manifest return to pure composition (`design.md` §2.1).
 - Marking the two checks as required in branch protection. That is a repository-settings action performed by a maintainer, subject to organization policy, and cannot be expressed in a workflow file.
 - Coverage measurement, coverage thresholds, and any reporting service.
 - Deployment, packaging, and release automation, all of which the existing `release.yml` and `publish-release.yml` workflows already own.

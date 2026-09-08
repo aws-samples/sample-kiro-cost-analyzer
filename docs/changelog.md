@@ -4,6 +4,17 @@
 
 ## Unreleased
 
+### CI — the existing test suites now run on every pull request
+
+- **Gap** — the repository carried 1002 backend/ETL pytest tests and 209 frontend Vitest tests, but no workflow executed any of them. The only workflows were `pr-title.yml`, `release.yml` and `publish-release.yml`, so a PR that broke every assertion still showed a green check set.
+- **Change** — new `.github/workflows/ci.yml` with two parallel jobs, `backend` (Python 3.13, `pytest tests/ -q`) and `frontend` (Node 22, `npm ci` → `lint` → `test` → `build`), on every PR to `main` and every push to `main`. `permissions: contents: read` only, no secrets, `pull_request` rather than `pull_request_target`, and `concurrency` with `cancel-in-progress`. No test was added or modified.
+- **New `requirements-dev.txt`** — `pytest`, `moto` and `hypothesis` were imported throughout `tests/` but pinned nowhere, so a fresh clone could not reproduce the suite. The manifest pins them (`9.1.1`, `5.2.3`, `6.167.1`) and pulls in the agent's runtime deps, which six test modules need at collection time.
+- **Manifest conflict** — composing all three deploy manifests is unsatisfiable: `backend/` and `etl/` pin `boto3==1.43.4`, while `bedrock-agentcore==1.19.0` requires `boto3>=1.43.31`, and `pip` exits with `ResolutionImpossible`. Deploy packages are built separately so no deploy is affected, but a single test environment cannot honour both; the manifest takes the agent's floor and restates `boto3`/`requests`. Aligning the three pins would remove the workaround.
+- **The suite is offline but not self-contained** — `botocore` resolves a region and a credential pair at client construction, before `moto` intercepts, and a runner has no `~/.aws/config`. Both jobs therefore set placeholder environment variables (fake AWS values; placeholder Cognito pool/client ids for the frontend). No test reaches a real endpoint.
+- **CI lands red, by design** — running the gates revealed five pre-existing defects that predate this change: 4 clock-dependent tests in `tests/test_etl_executions_handler.py` failing since 2026-08-25, 1 non-hermetic test in `tests/test_etl_config.py`, an unrunnable `test` script in `frontend/package.json` (`--no-webstorage` exists in no Node release, so the Vitest suite has never run through the documented command), 4 pt-BR frontend failures, and 42 lint errors. Each needs its own fix; `npm run build` is the only gate currently green. See `.kiro/specs/ci-test-workflow/design.md` §5 and `tasks.md` Checkpoint 6.
+- **Docs** — `CONTRIBUTING.md` now documents the install step and the environment variables both gates need locally.
+- **Spec** — `.kiro/specs/ci-test-workflow/` (requirements / design / tasks), with the requirements that local validation falsified amended in place.
+
 ## v3.8 — ETL Execution History & Full-Population Dashboard Summary (2026-08-26)
 
 ### Fix — Dashboard "Total Users" and summary no longer capped at the page size
