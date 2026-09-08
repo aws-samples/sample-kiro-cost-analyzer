@@ -39,6 +39,17 @@ def _get_dynamodb_resource(dynamodb_resource=None):
     return dynamodb_resource or boto3.resource("dynamodb")
 
 
+def _resolve_now(now=None) -> datetime:
+    """Return the provided instant, or the current time in UTC.
+
+    Injectable for the same reason the clients are: the window this handler
+    computes is relative to "now", so a test that cannot pin "now" has to place
+    its fixtures relative to the real clock and silently stops exercising the
+    code once enough time passes.
+    """
+    return now if isinstance(now, datetime) else datetime.now(timezone.utc)
+
+
 def _parse_days(query_params: dict) -> int:
     """Parse and clamp the ``days`` query parameter.
 
@@ -131,7 +142,7 @@ def _counter(record: dict | None, field: str) -> int | None:
 
 
 def handle_etl_executions(
-    query_params: dict, sfn_client=None, dynamodb_resource=None
+    query_params: dict, sfn_client=None, dynamodb_resource=None, now=None
 ) -> dict:
     """Handle GET /api/etl/executions — list recent ETL executions.
 
@@ -139,6 +150,9 @@ def handle_etl_executions(
         query_params: API Gateway query string parameters. Supports ``days``.
         sfn_client: Optional pre-configured Step Functions client for testing.
         dynamodb_resource: Optional pre-configured DynamoDB resource for testing.
+        now: Optional instant to treat as the present when computing the window.
+            Defaults to the current UTC time. Tests pin this so their fixtures
+            stay inside the window regardless of when the suite runs.
 
     Returns:
         Dict with the resolved window and the executions, most recent first.
@@ -149,7 +163,7 @@ def handle_etl_executions(
     if not state_machine_arn:
         return {"days": days, "executions": []}
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = _resolve_now(now) - timedelta(days=days)
     client = _get_sfn_client(sfn_client)
 
     # Step Functions returns executions most recent first, so the first result

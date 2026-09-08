@@ -73,8 +73,6 @@ pip install -r requirements-dev.txt
 
 - **Infrastructure**: `sam validate` for any `template.yaml` change
 
-Some of these gates currently fail on `main` for reasons unrelated to your change; see `.kiro/specs/ci-test-workflow/design.md` §5 for the current list, so you can tell a pre-existing failure from one you introduced.
-
 
 ## Using Kiro when contributing
 

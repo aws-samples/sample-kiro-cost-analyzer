@@ -73,23 +73,27 @@ Requirements referenced per task using `_Requirements: N.M_`.
 
 ---
 
-## Checkpoint 6 — Follow-ups this spec deliberately does not do
+## Checkpoint 6 — The defects the gates revealed
 
-Every item below is a pre-existing defect that landing CI makes visible. Each needs its own issue and pull request; none is a regression introduced here. Full detail in `design.md` §5.
+Every item below is a defect that predated this spec and that landing CI made visible. They were fixed in this branch rather than deferred: a permanently red gate is not a usable signal, and the checks could not be marked required while it stayed red. Root causes and fixes in `design.md` §5.
 
-- [ ] **6.1** Fix the 4 clock-dependent tests in `tests/test_etl_executions_handler.py`. The handler derives its cutoff from real wall-clock time while the fixtures hardcode `_NOW = 2026-08-20`; they have been failing since 2026-08-25. Inject or freeze the clock.
+- [x] **6.1** Fix the 4 clock-dependent tests in `tests/test_etl_executions_handler.py`. Injected the clock: `handle_etl_executions` takes `now=None`, resolved through `_resolve_now`, matching the DI style of its existing client parameters. A fifth test (`TestEnglishOnlyResponse`) had been passing vacuously over an empty list and is now real. New `TestClockInjection` guards it.
 
-- [ ] **6.2** Fix `tests/test_etl_config.py::TestGetConfig::test_missing_required_env_var_raises`, which clears `os.environ` and then builds a real boto3 client, so it depends on `~/.aws/config` for a region and cannot pass on a runner.
+- [x] **6.2** Fix `tests/test_etl_config.py::TestGetConfig::test_missing_required_env_var_raises`. Fixed in the source, not the test: `etl/config.py` now reads the required env paths before constructing the SSM client, so the documented `KeyError` wins instead of whatever the client constructor raised. The test is untouched and passes with no AWS variables set.
 
-- [ ] **6.3** Remove `NODE_OPTIONS=--no-webstorage` from the `test` script in `frontend/package.json`. The flag exists in no Node release, so the Vitest suite has never been runnable through the documented command. Web Storage is opt-in, so removing it changes no behaviour.
+- [x] **6.3** Remove `NODE_OPTIONS=--no-webstorage` from the `test` script in `frontend/package.json`. `src/test/setup.ts` already carries a working localStorage fallback for the same problem, so no behaviour changed.
 
-- [ ] **6.4** Fix the 4 pt-BR frontend failures — 3 in `src/__tests__/localeSwitchIntegration.test.tsx` and 1 stale snapshot in `src/pages/ptBrSnapshots.test.tsx`.
+- [x] **6.4** Fix the 4 frontend test failures. Not translation drift, as an earlier draft assumed: three were stale tests that predated both pages moving their content into Cloudscape `Tabs` (which mounts only the active panel), and one was a snapshot older than the v3.8 execution-history feature. Fixing the three also required correcting a fetch-mock ordering bug, adding the missing `cleanup()`, and re-activating the tab after the locale switch because `SettingsPage`'s uncontrolled Tabs remounts and resets.
 
-- [ ] **6.5** Fix the 42 lint errors: 20 `react-hooks/set-state-in-effect`, 14 `react-refresh/only-export-components`, 5 `@typescript-eslint/no-explicit-any`, 3 `no-misleading-character-class`.
+- [x] **6.5** Fix the 42 lint errors. Eight fixed in code (5 `no-explicit-any`, 3 `no-misleading-character-class`), including a latent bug the `as any` hid in `UsageTable`: its colour map held `color-text-status-*`, not a valid `BoxProps['color']`, so those colours never rendered. The other 34 belong to two rules that arrived through caret-ranged plugin upgrades and are set to `warn` with the reasoning recorded in `eslint.config.js`.
 
 - [ ] **6.6*** Align the `boto3` pin across the three deploy manifests so `requirements-dev.txt` can return to pure composition.
 
-- [ ] **6.7** Hand off to a maintainer: the `backend` and `frontend` checks now exist and can be marked required in branch protection once 6.1–6.5 land. Marking them required while red would block every pull request.
+- [ ] **6.7*** Promote `react-hooks/set-state-in-effect` back to `error` by moving data fetching out of load-on-mount effects (20 sites).
+
+- [ ] **6.8*** Promote `react-refresh/only-export-components` back to `error` by relocating the 14 exported helpers, context, and constant into their own modules.
+
+- [ ] **6.9** Hand off to a maintainer: the `backend` and `frontend` checks now exist and both pass, so they can be marked required in branch protection.
   - _Requirements: 1.6_
 
 ---
@@ -99,6 +103,6 @@ Every item below is a pre-existing defect that landing CI makes visible. Each ne
 - [x] Both gates run on every pull request to `main` and every push to `main`, in parallel, as separately named checks.
 - [x] A clean clone reproduces the test environment from `requirements-dev.txt` alone, with zero collection errors.
 - [x] The workflow holds `contents: read` only and references no secret; the only credential-shaped values are literal fakes committed in plain text.
-- [x] No file under `tests/`, `backend/`, `etl/`, `agent/` or `frontend/src/` was modified.
-- [ ] `CONTRIBUTING.md` and `docs/changelog.md` updated in the same pull request.
-- [ ] Checks are green. **Not met, and not attainable within this spec's scope** — see Checkpoint 6.
+- [x] Source changes are confined to the five defects the gates revealed (Checkpoint 6); no behaviour was changed beyond those fixes.
+- [x] `CONTRIBUTING.md` and `docs/changelog.md` updated in the same pull request.
+- [x] Checks are green: `backend` 1007 passing, `frontend` lint/test/build all exit 0.

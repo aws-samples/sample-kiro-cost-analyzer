@@ -82,11 +82,13 @@ def get_config() -> EtlConfig:
     if _cached_config is not None:
         return _cached_config
 
-    ssm = boto3.client("ssm", config=_SSM_CONFIG)
-
-    # Map each config field to its SSM parameter path. Required fields raise
+    # Read the env paths BEFORE constructing any client. Required fields raise
     # KeyError if the env var is unset; optional fields resolve to "" when the
-    # env var is unset.
+    # env var is unset. Ordering matters: building the SSM client first made a
+    # misconfigured deployment surface as whatever error the client constructor
+    # happened to raise (for example NoRegionError when no region is resolvable)
+    # instead of the KeyError this function documents, and it paid for a client
+    # that was never going to be used.
     paths = {
         "bucket_name": os.environ["SSM_BUCKET_NAME"],
         "source_prefix": os.environ["SSM_SOURCE_PREFIX"],
@@ -95,6 +97,8 @@ def get_config() -> EtlConfig:
         "source_bucket_role_arn": os.environ.get("SSM_SOURCE_BUCKET_ROLE_ARN", ""),
         "identity_store_role_arn": os.environ.get("SSM_IDENTITY_STORE_ROLE_ARN", ""),
     }
+
+    ssm = boto3.client("ssm", config=_SSM_CONFIG)
 
     # Single batched read for every configured path. GetParameters fetches up to
     # 10 names in one network call, collapsing six per-invocation reads into one

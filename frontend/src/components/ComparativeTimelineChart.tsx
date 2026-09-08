@@ -1,4 +1,5 @@
 import MixedLineBarChart from '@cloudscape-design/components/mixed-line-bar-chart';
+import type { MixedLineBarChartProps } from '@cloudscape-design/components/mixed-line-bar-chart';
 import Box from '@cloudscape-design/components/box';
 import Header from '@cloudscape-design/components/header';
 import Container from '@cloudscape-design/components/container';
@@ -33,7 +34,7 @@ export default function ComparativeTimelineChart({ timeline, loading }: Comparat
     );
   }
 
-  const series: any[] = [
+  const series: MixedLineBarChartProps.ChartSeries<string>[] = [
     {
       title: t('git.comparativeTimeline.series.commits'),
       type: 'bar',

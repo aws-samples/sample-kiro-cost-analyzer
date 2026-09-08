@@ -39,6 +39,21 @@ import type {
 } from '../types';
 import { slugToTranslationKey, slugToAlertType, RETRYABLE_SLUGS, isStatusSlug } from './correlationStatusMaps';
 
+/**
+ * Emoji, pictographs, and the zero-width / variation-selector code points that
+ * decorate them, stripped from agent-authored insight text before it is split
+ * into a title and a body.
+ *
+ * Written as an alternation rather than one character class on purpose: a class
+ * that mixes base characters with combining marks (the variation selectors, the
+ * zero-width joiner, the combining enclosing keycap) is ambiguous about whether
+ * it matches the mark alone or a grapheme, which is what
+ * `no-misleading-character-class` reports. Each alternative here covers exactly
+ * one contiguous range, so nothing can silently combine.
+ */
+const DECORATIVE_CHARS =
+  /[\u{1F300}-\u{1FAFF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FE0F}]|\u{200D}|\u{20E3}|[\u{E0020}-\u{E007F}]/gu;
+
 function toDateStr(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
@@ -467,7 +482,7 @@ export default function UserPage() {
                   <SpaceBetween size="m">
                     <Header variant="h3">{t('productivity.correlation.insights.title')}</Header>
                     {localizedInsights.map((insight, idx) => {
-                      const cleaned = insight.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, '').trim();
+                      const cleaned = insight.replace(DECORATIVE_CHARS, '').trim();
                       const colonIdx = cleaned.indexOf(':');
                       const hasTitle = colonIdx > 0 && colonIdx < 60;
                       const title = hasTitle ? cleaned.slice(0, colonIdx).trim() : null;

@@ -45,7 +45,16 @@ Preços dos Planos
 Prompts
 Status do ETL
 Executar ETL
-Nenhuma execução registrada. Dispare o ETL manualmente ou aguarde a execução agendada."
+Nenhuma execução registrada. Inicie o ETL manualmente ou aguarde a execução agendada.
+Histórico de Execuções
+Execuções do ETL nos últimos 5 dias.
+Data de Início
+Data de Fim
+Tempo Decorrido
+Qtde de Arquivos
+Status
+Nenhuma execução
+Nenhuma execução do ETL ocorreu nos últimos 5 dias."
 `;
 
 exports[`pt-BR snapshot regression > SignupPage renders translated pt-BR text 1`] = `

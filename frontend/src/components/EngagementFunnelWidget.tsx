@@ -7,6 +7,7 @@ import Header from '@cloudscape-design/components/header';
 import Popover from '@cloudscape-design/components/popover';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import { useI18n } from '../i18n/useI18n';
+import type { TranslationKey } from '../locales/keys';
 import { get, ApiError } from '../api/client';
 import type { EngagementResponse } from '../types';
 import D3FunnelChart from './charts/D3FunnelChart';
@@ -54,7 +55,7 @@ export default function EngagementFunnelWidget({ dateParams }: EngagementFunnelW
     formatNumber(value, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
   const funnelChartData = data?.funnel?.map((stage) => ({
-    label: t(`engagement.funnel.stage.${stage.name}` as any),
+    label: t(`engagement.funnel.stage.${stage.name}` as TranslationKey),
     value: stage.count,
     percentage: stage.conversionRate,
   })) ?? [];

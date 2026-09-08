@@ -47,11 +47,11 @@ Closing both gaps requires no new tests and no change to any existing test. Ever
 
 2.4. THE manifest SHALL pin an exact version for each test-only dependency.
 
-2.5. WHEN the manifest is installed into an empty virtual environment on a fresh clone THEN `pytest` SHALL collect every module in `tests/` with zero collection errors, with no further manual step.
+2.5. WHEN the manifest is installed into an empty virtual environment on a fresh clone THEN `pytest` SHALL collect every module in `tests/` with zero collection errors and the suite SHALL pass, with no further manual step beyond the environment variables named in Requirement 5.3.
 
 2.6. THE manifest SHALL NOT introduce a Lambda runtime dependency that no deploy manifest already declares.
 
-> **Amended after validation.** 2.2 and 2.3 originally required referencing all three deploy manifests and restating nothing. That is unsatisfiable: `backend/` and `etl/` pin `boto3==1.43.4` while the agent's `bedrock-agentcore==1.19.0` requires `boto3>=1.43.31`, and `pip` exits with `ResolutionImpossible`. See `design.md` §2.1. 2.5 originally required the suite to *pass*; it does not, for reasons that predate this spec and are recorded in `design.md` §5, so the criterion is now about collection, which is what this manifest controls.
+> **Amended after validation.** 2.2 and 2.3 originally required referencing all three deploy manifests and restating nothing. That is unsatisfiable: `backend/` and `etl/` pin `boto3==1.43.4` while the agent's `bedrock-agentcore==1.19.0` requires `boto3>=1.43.31`, and `pip` exits with `ResolutionImpossible`. See `design.md` §2.1.
 
 ## Requirement 3: The backend gate matches the deployed runtime
 
@@ -121,10 +121,12 @@ Closing both gaps requires no new tests and no change to any existing test. Ever
 
 ## Out of scope
 
-- Writing new tests or modifying existing ones. This spec only executes what the repository already contains.
-- Fixing the pre-existing defects that running the gates reveals — 4 clock-dependent backend tests, 1 non-hermetic backend test, the unrunnable `test` script, 4 pt-BR frontend failures, and 42 lint errors. All are enumerated in `design.md` §5 and each warrants its own issue. **CI therefore lands red**, which is the accurate signal, not a regression.
+- Writing new tests for behaviour this spec does not change. The only tests added are the regression guard for the injected clock and the tab-activation helper the existing locale tests needed.
 - Aligning the `boto3` pin across the three deploy manifests, which would let the dev manifest return to pure composition (`design.md` §2.1).
 - Marking the two checks as required in branch protection. That is a repository-settings action performed by a maintainer, subject to organization policy, and cannot be expressed in a workflow file.
+- Promoting `react-hooks/set-state-in-effect` and `react-refresh/only-export-components` back to `error`. Both are `warn` for the reasons recorded in `eslint.config.js` and `design.md` §5.1; each needs its own change.
 - Coverage measurement, coverage thresholds, and any reporting service.
 - Deployment, packaging, and release automation, all of which the existing `release.yml` and `publish-release.yml` workflows already own.
 - Dependency-update automation and vulnerability scanning.
+
+> **Amended after validation.** This list originally excluded fixing the pre-existing defects that the gates revealed, and stated that CI would land red as a result. They were fixed in this branch instead — leaving a repository permanently red would have made the gate worthless as a signal, and marking the checks required would then have blocked every pull request. `design.md` §5 records each root cause and fix.
