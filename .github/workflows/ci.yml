@@ -80,13 +80,20 @@ jobs:
       - name: Install
         run: npm ci
 
+      # Each gate runs even when an earlier one failed, so one red step does
+      # not hide the state of the other two. The job still fails; `!cancelled()`
+      # keeps a real cancellation from being overridden. Requirement 4.3 asks
+      # for all three scripts to run, not just up to the first failure.
       - name: Lint
+        if: ${{ !cancelled() }}
         run: npm run lint
 
       - name: Test
+        if: ${{ !cancelled() }}
         run: npm run test
 
       # Chains check:locales (catalog parity, sort order, non-empty values)
       # and `tsc -b`, which is the only type-check in this job.
       - name: Build
+        if: ${{ !cancelled() }}
         run: npm run build

@@ -151,6 +151,16 @@ frontend:
 
 The two `VITE_` values are read by `src/auth/AuthProvider.tsx` at module load, which constructs a `CognitoUserPool` eagerly. Without them three test files fail to import with `Both UserPoolId and ClientId are required`. A Cognito pool id and app-client id are not secrets, and these are placeholders in any case.
 
+`lint`, `test` and `build` each carry `if: ${{ !cancelled() }}`. Without it the default per-step fail-fast stops the job at the first red step, and the first CI run demonstrated the cost: `lint` failed, and `test` and `build` were reported as *skipped*, so the state of the other two gates was invisible to a reviewer. Requirement 4.3 asks for all three scripts to run, not for the job to stop at the first failure. `!cancelled()` rather than `always()` so a genuine cancellation is still honoured. The job's own conclusion is unchanged — any red step still fails it.
+
+### 3.6 Validated on CI, not only locally
+
+Run on the pull request that introduced this workflow:
+
+- Both jobs started at the same second, confirming they are parallel and neither declares `needs` (P6).
+- `backend`: install succeeded (`boto3` resolved to 1.43.89), and `pytest` reported **5 failed, 997 passed** — the same five tests, with the same causes, as the local run. The workflow itself is sound; the failures are the repository's (§5).
+- `frontend`: `npm ci` succeeded and `lint` failed with the expected 42 errors.
+
 Script mapping, read from `frontend/package.json`:
 
 | Step | Script | Covers |
