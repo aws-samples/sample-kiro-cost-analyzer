@@ -15,6 +15,7 @@ from moto import mock_aws
 from backend.handlers.etl_executions_handler import (
     _elapsed_seconds,
     _parse_days,
+    _resolve_now,
     handle_etl_executions,
 )
 
@@ -126,6 +127,7 @@ class TestHappyPath:
             {"days": "5"},
             sfn_client=client,
             dynamodb_resource=dynamodb,
+            now=_NOW,
         )
 
         assert result["days"] == 5
@@ -178,6 +180,7 @@ class TestRunningExecution:
             {"days": "5"},
             sfn_client=client,
             dynamodb_resource=dynamodb,
+            now=_NOW,
         )
 
         assert len(result["executions"]) == 1
@@ -214,6 +217,7 @@ class TestNoMatchingExecRecord:
             {"days": "5"},
             sfn_client=client,
             dynamodb_resource=dynamodb,
+            now=_NOW,
         )
 
         ex = result["executions"][0]
@@ -259,6 +263,7 @@ class TestWindowFiltering:
             {"days": "5"},
             sfn_client=client,
             dynamodb_resource=dynamodb,
+            now=_NOW,
         )
 
         # Only the recent one should be in the result
@@ -384,6 +389,7 @@ class TestEnglishOnlyResponse:
             {"days": "5"},
             sfn_client=client,
             dynamodb_resource=dynamodb,
+            now=_NOW,
         )
 
         # Check all string fields in the response
@@ -448,3 +454,72 @@ class TestElapsedSecondsProperty:
     def test_non_datetime_stop_returns_none(self, start, stop):
         result = _elapsed_seconds(start, stop)
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Clock injection
+# ---------------------------------------------------------------------------
+
+
+class TestClockInjection:
+    """The window is computed from the injected instant, not the wall clock.
+
+    Regression guard. These tests previously placed their fixtures relative to a
+    hardcoded ``_NOW`` while the handler derived its cutoff from
+    ``datetime.now()``, so every one of them silently stopped exercising the
+    filter once real time moved past ``_NOW + days`` — and then started failing.
+    """
+
+    _ARN = "arn:aws:states:us-east-1:123456789012:stateMachine:etl-pipeline"
+
+    @patch.dict(os.environ, {"STATE_MACHINE_ARN": _ARN, "ANALYTICS_TABLE": ""})
+    def test_execution_inside_injected_window_is_kept(self):
+        far_past = datetime(2001, 1, 1, tzinfo=timezone.utc)
+        execution = _make_execution("exec-old-but-relative", far_past - timedelta(hours=1))
+
+        result = handle_etl_executions(
+            {"days": "5"},
+            sfn_client=FakeSFNClient([[execution]]),
+            now=far_past,
+        )
+
+        # An absolute date decades in the past is still inside a 5-day window
+        # when "now" is pinned next to it.
+        assert [ex["executionName"] for ex in result["executions"]] == [
+            "exec-old-but-relative"
+        ]
+
+    @patch.dict(os.environ, {"STATE_MACHINE_ARN": _ARN, "ANALYTICS_TABLE": ""})
+    def test_execution_outside_injected_window_is_dropped(self):
+        execution = _make_execution("exec-too-old", _NOW - timedelta(days=6))
+
+        result = handle_etl_executions(
+            {"days": "5"},
+            sfn_client=FakeSFNClient([[execution]]),
+            now=_NOW,
+        )
+
+        assert result["executions"] == []
+
+    @patch.dict(os.environ, {"STATE_MACHINE_ARN": _ARN, "ANALYTICS_TABLE": ""})
+    def test_omitted_clock_falls_back_to_wall_clock(self):
+        # Anchored to real "now" so the default path is genuinely exercised
+        # without reintroducing a fixture that expires.
+        execution = _make_execution(
+            "exec-now", datetime.now(timezone.utc) - timedelta(minutes=1)
+        )
+
+        result = handle_etl_executions(
+            {"days": "5"}, sfn_client=FakeSFNClient([[execution]])
+        )
+
+        assert [ex["executionName"] for ex in result["executions"]] == ["exec-now"]
+
+    def test_resolve_now_ignores_non_datetime(self):
+        for bogus in (None, "", "2026-08-20", 0, 12345):
+            resolved = _resolve_now(bogus)
+            assert isinstance(resolved, datetime)
+            assert resolved.tzinfo is not None
+
+    def test_resolve_now_returns_injected_instant(self):
+        assert _resolve_now(_NOW) is _NOW

@@ -24,7 +24,7 @@
  * placeholder token.
  */
 
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import type { ReactNode } from 'react';
@@ -35,7 +35,7 @@ import { SplitPanelProvider } from '../hooks/useSplitPanel';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import DashboardPage from '../pages/DashboardPage';
 import SettingsPage from '../pages/SettingsPage';
-import type { UsageResponse } from '../types';
+import type { AccountUsageResponse, UsageResponse } from '../types';
 
 const ADMIN_USER: AuthUser = {
   sub: 'test-admin-sub',
@@ -119,6 +119,60 @@ function makeUsageResponse(): UsageResponse {
   };
 }
 
+/**
+ * Build an `AccountUsageResponse` for the account-overview fetch.
+ *
+ * `DashboardPage` calls `/api/usage/account` as well as `/api/usage`, and the
+ * first is a *prefix* of the second — a mock that tests `url.includes('/api/usage')`
+ * before the account path answers the account call with the users payload. The
+ * dashboard tolerates the wrong shape (it reads `accountData?.totals`), so the
+ * only symptom is an "Overview" tab stuck on "No data available", but in the
+ * in-flight scenario it also makes the account call await the users promise.
+ * Route the account path first and give it its own body.
+ */
+function makeAccountUsageResponse(): AccountUsageResponse {
+  return {
+    totals: {
+      totalCredits: 22222.21,
+      totalOverageCredits: 100,
+      totalMessages: 4200,
+      totalConversations: 76,
+    },
+    timeline: [],
+    breakdownByTier: [],
+    breakdownByClientType: [],
+    period: { startDate: '2024-01-01', endDate: '2024-01-31', granularity: 'DAILY' },
+  };
+}
+
+/**
+ * Activate a Cloudscape tab by its tab id, within one render's container.
+ *
+ * Both `DashboardPage` and `SettingsPage` render their sections inside a
+ * Cloudscape `Tabs`, which mounts only the active panel — so a field or table
+ * that lives in a non-default tab is simply absent from the DOM until that tab
+ * is selected. Addressed by `data-testid` (which Cloudscape sets to the tab id)
+ * rather than by the label, so the helper is unaffected by a locale switch.
+ *
+ * Scoped to `scope` rather than to `document` on purpose: more than one render
+ * tree can be attached while the file runs, and a document-wide query can pick
+ * a tab from an earlier one, whose click then changes nothing visible here.
+ */
+async function openTab(scope: HTMLElement, tabId: string) {
+  const selector = `[role="tab"][data-testid="${tabId}"]`;
+  const tab = scope.querySelector<HTMLElement>(selector);
+  expect(tab, `tab "${tabId}" not found in this render`).not.toBeNull();
+  await act(async () => {
+    fireEvent.click(tab as HTMLElement);
+    await Promise.resolve();
+  });
+  // Re-query rather than reusing `tab`: React may replace the button node on
+  // re-render, leaving the original reference detached and forever unselected.
+  await waitFor(() => {
+    expect(scope.querySelector(selector)).toHaveAttribute('aria-selected', 'true');
+  });
+}
+
 describe('Locale switch integration', () => {
   const memoryStore = new Map<string, string>();
   memoryStore.set('kiro_id_token', 'test-token');
@@ -154,6 +208,11 @@ describe('Locale switch integration', () => {
   });
 
   afterEach(() => {
+    // Unmount explicitly. Without this, each test's tree stays attached to the
+    // document, so `screen.*` queries span several renders at once: a lookup can
+    // resolve against an earlier tree, and a click can land on a tab that is no
+    // longer the live one.
+    cleanup();
     vi.restoreAllMocks();
   });
 
@@ -173,6 +232,12 @@ describe('Locale switch integration', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/api/usage/account')) {
+          return new Response(JSON.stringify(makeAccountUsageResponse()), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
         if (url.includes('/api/usage')) {
           return new Response(JSON.stringify(usage), {
             status: 200,
@@ -196,7 +261,7 @@ describe('Locale switch integration', () => {
       }),
     );
 
-    render(
+    const { container } = render(
       <Harness>
         <>
           <LanguageSwitcher />
@@ -204,6 +269,10 @@ describe('Locale switch integration', () => {
         </>
       </Harness>,
     );
+
+    // The usage table lives in the "Users" tab, which Cloudscape mounts only
+    // while it is the active one. The default tab is "Overview".
+    await openTab(container, 'users');
 
     // Wait for the fetch-driven render.
     await waitFor(() => {
@@ -286,6 +355,12 @@ describe('Locale switch integration', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/api/usage/account')) {
+          return new Response(JSON.stringify(makeAccountUsageResponse()), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
         if (url.includes('/api/usage')) {
           const body = await usagePromise;
           return new Response(JSON.stringify(body), {
@@ -310,7 +385,7 @@ describe('Locale switch integration', () => {
       }),
     );
 
-    render(
+    const { container } = render(
       <Harness>
         <>
           <LanguageSwitcher />
@@ -318,6 +393,10 @@ describe('Locale switch integration', () => {
         </>
       </Harness>,
     );
+
+    // The usage table lives in the "Users" tab, which Cloudscape mounts only
+    // while it is the active one. The default tab is "Overview".
+    await openTab(container, 'users');
 
     // Switch locale BEFORE the in-flight request resolves.
     const switcherTrigger = screen.getByRole('button', { name: /Language/ });
@@ -402,7 +481,7 @@ describe('Locale switch integration', () => {
       }),
     );
 
-    render(
+    const { container } = render(
       <Harness>
         <>
           <LanguageSwitcher />
@@ -417,10 +496,10 @@ describe('Locale switch integration', () => {
       expect(screen.getByTestId('identity')).toBeInTheDocument();
     });
 
-    // Navigate to the Identity tab to access the Identity Store Role ARN field
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('identity'));
-    });
+    // getByTestId('identity') above finds the tab *button*; the panel holding
+    // the Identity Store role ARN field is only mounted while that tab is the
+    // active one, and the default tab is "etl".
+    await openTab(container, 'identity');
 
     await waitFor(() => {
       expect(screen.getByText('Identity Store Role ARN')).toBeInTheDocument();
@@ -444,6 +523,13 @@ describe('Locale switch integration', () => {
     await waitFor(() => {
       expect(i18n.language).toBe('pt-BR');
     });
+
+    // Re-activate the tab. The locale change re-runs the page's config effect,
+    // which flips `loading` back to true while `etlStatus` is still null, so
+    // SettingsPage swaps its Tabs for the skeleton and then mounts a fresh
+    // Tabs. That Tabs is uncontrolled, so the remount silently returns the
+    // selection to the first tab ("etl") and unmounts the identity panel.
+    await openTab(container, 'identity');
 
     // Expected pt-BR values for the four user-facing strings that belong
     // to the Identity Store role ARN field block. These are the

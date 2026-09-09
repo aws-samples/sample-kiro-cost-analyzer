@@ -4,6 +4,7 @@ import Header from '@cloudscape-design/components/header';
 import Pagination from '@cloudscape-design/components/pagination';
 import TextFilter from '@cloudscape-design/components/text-filter';
 import Box from '@cloudscape-design/components/box';
+import type { BoxProps } from '@cloudscape-design/components/box';
 import Link from '@cloudscape-design/components/link';
 import Badge from '@cloudscape-design/components/badge';
 import Popover from '@cloudscape-design/components/popover';
@@ -220,14 +221,14 @@ export default function UsageTable({ users, loading }: UsageTableProps) {
           cell: (item) => {
             const freq = getFrequencyStatus(item.daysSinceLastActive);
             if (!freq) return '—';
-            const colorMap: Record<string, string> = {
-              green: 'color-text-status-success',
-              blue: 'color-text-status-info',
-              red: 'color-text-status-error',
-              grey: 'color-text-status-inactive',
+            const colorMap: Record<string, BoxProps['color']> = {
+              green: 'text-status-success',
+              blue: 'text-status-info',
+              red: 'text-status-error',
+              grey: 'text-status-inactive',
             };
             return (
-              <Box color={colorMap[freq.color] as any}>
+              <Box color={colorMap[freq.color]}>
                 {t(`users.frequency.${freq.status}`)}
               </Box>
             );

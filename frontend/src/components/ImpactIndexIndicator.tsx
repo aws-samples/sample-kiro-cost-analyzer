@@ -4,6 +4,7 @@ import Box from '@cloudscape-design/components/box';
 import Header from '@cloudscape-design/components/header';
 import ColumnLayout from '@cloudscape-design/components/column-layout';
 import { useI18n } from '../i18n/useI18n';
+import type { TranslationKey } from '../locales/keys';
 
 interface ImpactIndexIndicatorProps {
   impactIndex: number | null;
@@ -31,7 +32,7 @@ export default function ImpactIndexIndicator({ impactIndex, impactLevel, suffici
   const { t } = useI18n();
 
   const levelLabel = impactLevel
-    ? t(`git.impact.level.${impactLevel}` as any, { defaultValue: impactLevel })
+    ? t(`git.impact.level.${impactLevel}` as TranslationKey, { defaultValue: impactLevel })
     : '—';
 
   if (!sufficientData || impactIndex === null) {

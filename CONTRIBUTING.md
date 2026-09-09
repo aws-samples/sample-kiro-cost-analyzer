@@ -55,11 +55,23 @@ Before contributing code, please skim [`.kiro/steering/development-standards.md`
 - **Tests**: pytest + moto + Hypothesis (Python); Vitest + Testing Library + fast-check (TypeScript). Property-based tests use a minimum of 100 iterations.
 - **Documentation**: README and `docs/**` are part of the contribution. If your PR changes a deploy command, parameter name, schema, region default, cost driver, or project structure, the relevant doc is updated in the same PR. See section 8.5 of the steering file.
 
-Validate your change locally before opening the PR:
+Validate your change locally before opening the PR. The same commands run in CI (`.github/workflows/ci.yml`), which executes them on every PR to `main`.
 
-- Backend: `python -m pytest tests/ -v`
-- Frontend: `cd frontend && npm run test` and `cd frontend && npm run build` (the build also runs the locale parity check)
-- Infrastructure: `sam validate` for any `template.yaml` change
+Install the test dependencies once, into a virtual environment:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+- **Backend**: `AWS_DEFAULT_REGION=us-east-1 python -m pytest tests/ -v`
+
+  The region is required: `botocore` resolves one when a client is constructed, before `moto` intercepts the call. A few tests additionally need a placeholder credential pair (`AWS_ACCESS_KEY_ID=testing AWS_SECRET_ACCESS_KEY=testing AWS_SESSION_TOKEN=testing`). No test reaches a real AWS endpoint. CI runs the same command with `-q`.
+
+- **Frontend**: `cd frontend && npm run lint`, `npm run test` and `npm run build` (the build also runs the locale parity check and `tsc -b`).
+
+  `npm run test` needs `VITE_COGNITO_USER_POOL_ID` and `VITE_COGNITO_CLIENT_ID` set to any placeholder value, or three test files fail to import.
+
+- **Infrastructure**: `sam validate` for any `template.yaml` change
 
 
 ## Using Kiro when contributing

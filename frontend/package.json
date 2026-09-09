@@ -10,7 +10,7 @@
     "build": "npm run check:locales && tsc -b && vite build && npm run report:i18n-sizes",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "NODE_OPTIONS=--no-webstorage vitest --run"
+    "test": "vitest --run"
   },
   "dependencies": {
     "@cloudscape-design/components": "^3.0.1270",

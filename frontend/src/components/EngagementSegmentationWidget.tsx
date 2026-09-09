@@ -10,6 +10,7 @@ import PieChart from '@cloudscape-design/components/pie-chart';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import { useSearchParams } from 'react-router';
 import { useI18n } from '../i18n/useI18n';
+import type { TranslationKey } from '../locales/keys';
 import { get, ApiError } from '../api/client';
 import type { EngagementResponse } from '../types';
 import SkeletonLoader from './SkeletonLoader';
@@ -58,7 +59,7 @@ export default function EngagementSegmentationWidget({ dateParams }: EngagementS
     formatNumber(value, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
   const pieData = data?.segmentation?.map((seg) => ({
-    title: t(`engagement.category.${seg.category}` as any),
+    title: t(`engagement.category.${seg.category}` as TranslationKey),
     value: seg.count,
     color: CATEGORY_COLORS[seg.category] ?? '#5f6b7a',
   })) ?? [];
