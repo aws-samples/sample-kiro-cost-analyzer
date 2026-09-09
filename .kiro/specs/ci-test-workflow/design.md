@@ -187,9 +187,21 @@ So Node 22 is the right choice for the two gates that can pass (`lint`, `build`)
 
 ### 3.5 Action version pinning
 
-Actions are referenced by major tag — `actions/checkout@v4`, `actions/setup-python@v5`, `actions/setup-node@v4` — matching the convention already used by `pr-title.yml`, `release.yml` and `publish-release.yml`, all of which reference `@v4`/`@v5` tags.
+Actions are referenced by major tag — `actions/checkout@v7`, `actions/setup-python@v7`, `actions/setup-node@v7` — each of which declares `using: node24` in its `action.yml`.
 
-Pinning to full commit SHAs is the stronger supply-chain posture and was considered. It is rejected here for consistency: this workflow should not introduce a second convention alongside three existing workflows, and a repository-wide move to SHA pinning is a separate change that should cover all four files at once. All three actions are first-party `actions/*`.
+The versions this workflow first shipped with (`checkout@v4`, `setup-python@v5`, `setup-node@v4`) all declare `using: node20`, and GitHub now emits a deprecation warning on every run: *"Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24."* Both jobs raised it. The runs still passed — the runner already forces those actions onto Node 24 — but the notice is a countdown, not an FYI, so the bump landed with the workflow rather than after it.
+
+Breaking changes across the skipped majors were checked against each release's notes before bumping, and none affects this workflow:
+
+| Action | Breaking change | Impact here |
+|---|---|---|
+| `checkout` v5 | requires runner ≥ v2.327.1 | none — GitHub-hosted `ubuntu-latest` is well past it |
+| `setup-python` v6 | Node 24 upgrade + same runner floor | none |
+| `setup-node` v5 | auto-caches when `package.json` has a `packageManager` field | none — `frontend/package.json` has no such field, so the explicit `cache: npm` remains the mechanism |
+
+This does mean `ci.yml` no longer matches `release.yml` and `publish-release.yml`, which still reference `actions/checkout@v4` and will keep raising the same warning. Bumping those is deliberately left out of this change — they are pre-existing files this spec does not own — and is tracked in `tasks.md`.
+
+Pinning to full commit SHAs is the stronger supply-chain posture and was considered. It is rejected here for consistency: a repository-wide move to SHA pinning is a separate change that should cover all four workflow files at once. All three actions are first-party `actions/*`.
 
 ## 4. Correctness properties
 

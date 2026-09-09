@@ -37,9 +37,9 @@ jobs:
       AWS_SECRET_ACCESS_KEY: testing
       AWS_SESSION_TOKEN: testing
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # Must equal the Runtime declared in template.yaml Globals.
           python-version: '3.13'
@@ -67,9 +67,9 @@ jobs:
       VITE_COGNITO_USER_POOL_ID: us-east-1_TESTPOOL
       VITE_COGNITO_CLIENT_ID: testclientid1234567890
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # >= 22.6 is required: check:locales runs the TypeScript entrypoint
           # scripts/check-locales.ts through `node --experimental-strip-types`.

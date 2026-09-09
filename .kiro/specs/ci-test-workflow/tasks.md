@@ -89,6 +89,8 @@ Every item below is a defect that predated this spec and that landing CI made vi
 
 - [ ] **6.6*** Align the `boto3` pin across the three deploy manifests so `requirements-dev.txt` can return to pure composition.
 
+- [ ] **6.10** Bump `actions/checkout@v4` to a `node24` major in `release.yml` and `publish-release.yml`. Both still target Node 20 and raise the same deprecation warning `ci.yml` no longer does (`design.md` §3.5). Left out of this change because those files predate this spec.
+
 - [ ] **6.7*** Promote `react-hooks/set-state-in-effect` back to `error` by moving data fetching out of load-on-mount effects (20 sites).
 
 - [ ] **6.8*** Promote `react-refresh/only-export-components` back to `error` by relocating the 14 exported helpers, context, and constant into their own modules.
