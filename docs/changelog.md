@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## v3.8.1 — CI test gates, pre-existing defect fixes and node24 actions (2026-09-09)
+
 ### CI — the existing test suites now run on every pull request
 
 - **Gap** — the repository carried 1002 backend/ETL pytest tests and 209 frontend Vitest tests, but no workflow executed any of them. The only workflows were `pr-title.yml`, `release.yml` and `publish-release.yml`, so a PR that broke every assertion still showed a green check set.
