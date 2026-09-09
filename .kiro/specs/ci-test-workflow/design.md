@@ -199,7 +199,7 @@ Breaking changes across the skipped majors were checked against each release's n
 | `setup-python` v6 | Node 24 upgrade + same runner floor | none |
 | `setup-node` v5 | auto-caches when `package.json` has a `packageManager` field | none — `frontend/package.json` has no such field, so the explicit `cache: npm` remains the mechanism |
 
-This does mean `ci.yml` no longer matches `release.yml` and `publish-release.yml`, which still reference `actions/checkout@v4` and will keep raising the same warning. Bumping those is deliberately left out of this change — they are pre-existing files this spec does not own — and is tracked in `tasks.md`.
+`release.yml` and `publish-release.yml` were bumped to `actions/checkout@v7` in the same change, so all four workflow files now run their actions on `node24` and none raises the warning. Those two `git push` after checking out — the release branch and the release tag respectively — which depends on `persist-credentials`. That input still defaults to `true` in v5, v6 and v7, so the push keeps working; `fetch-depth` (1) and `fetch-tags` (false) are also unchanged, and `publish-release.yml` sets `fetch-depth: 0` explicitly for the tag lookup. Both were verified against each version's `action.yml` before bumping, because neither workflow can be exercised from a pull request: one is `workflow_dispatch`, the other triggers on a `VERSION` change reaching `main`.
 
 Pinning to full commit SHAs is the stronger supply-chain posture and was considered. It is rejected here for consistency: a repository-wide move to SHA pinning is a separate change that should cover all four workflow files at once. All three actions are first-party `actions/*`.
 

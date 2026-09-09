@@ -89,7 +89,7 @@ Every item below is a defect that predated this spec and that landing CI made vi
 
 - [ ] **6.6*** Align the `boto3` pin across the three deploy manifests so `requirements-dev.txt` can return to pure composition.
 
-- [ ] **6.10** Bump `actions/checkout@v4` to a `node24` major in `release.yml` and `publish-release.yml`. Both still target Node 20 and raise the same deprecation warning `ci.yml` no longer does (`design.md` §3.5). Left out of this change because those files predate this spec.
+- [x] **6.10** Bump `actions/checkout@v4` to `@v7` in `release.yml` and `publish-release.yml`, so all four workflow files run their actions on `node24`. Both workflows `git push` after checkout, so `persist-credentials` was verified to still default to `true` in v5–v7 before bumping — neither can be exercised from a pull request (`workflow_dispatch` and a `VERSION` change on `main`), so the check had to be done by reading each version's `action.yml`.
 
 - [ ] **6.7*** Promote `react-hooks/set-state-in-effect` back to `error` by moving data fetching out of load-on-mount effects (20 sites).
 
