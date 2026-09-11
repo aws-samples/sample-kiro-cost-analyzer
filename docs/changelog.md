@@ -11,6 +11,12 @@
 - **Verified** — in a clean Python 3.13 environment `pip install -r requirements-dev.txt` exits 0 with no conflict, resolving `boto3` and `botocore` to 1.43.92, and `pytest tests/ -q` passes 1007/1007.
 - **Constraint going forward** — dropping the `backend/`/`etl/` pin below `1.43.31` reintroduces `ResolutionImpossible`. Recorded in the manifest header and in the spec's task 6.6.
 
+### Dependencies — frontend dev dependencies bumped
+
+- **`vitest` and `@vitest/mocker`** — `4.1.4` → `4.1.11` (#61). Patch-level within the same minor, so no test had to change; the `frontend` gate ran the full Vitest suite on the bump before it merged.
+- **`js-yaml`** — `4.3.1` → `4.3.2` (#60), a transitive dev dependency, lockfile only.
+- Both arrived as Dependabot pull requests and are dev-only: neither package ships in a Lambda deployment package or in the browser bundle.
+
 ## v3.8.1 — CI test gates, pre-existing defect fixes and node24 actions (2026-09-09)
 
 ### CI — the existing test suites now run on every pull request
