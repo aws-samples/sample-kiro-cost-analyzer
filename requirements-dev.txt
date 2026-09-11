@@ -3,26 +3,30 @@
 #     pip install -r requirements-dev.txt
 #
 # ---------------------------------------------------------------------------
-# Why this file does NOT simply compose the three deploy manifests
+# This file composes the three deploy manifests
 # ---------------------------------------------------------------------------
-# The intended shape was `-r backend/requirements.txt`, `-r etl/...` and
-# `-r agent/...`, keeping each deploy manifest authoritative. That combination
-# is unsatisfiable today and pip exits with ResolutionImpossible:
+# Each deploy manifest stays authoritative for its own runtime and is
+# referenced rather than restated, so a pin can never drift between what is
+# deployed and what is tested. Only the test-only libraries are added on top.
 #
-#   backend/requirements.txt  boto3==1.43.4
-#   etl/requirements.txt      boto3==1.43.4
-#   agent/...                 bedrock-agentcore==1.19.0 -> boto3>=1.43.31
-#                             strands-agents==1.50.2    -> boto3>=1.26.0,<2
+# Composition is possible because all three manifests agree on boto3:
+# backend/ and etl/ pin it exactly, and the agent's packages set only floors
+# at or below that pin:
 #
-# Each Lambda deployment package is built separately, so this never breaks a
-# deploy -- but one combined test environment cannot honour both pins. The
-# agent's floor wins here, because its packages are imported at collection
-# time by six test modules and cannot be skipped.
+#   backend/requirements.txt  boto3==1.43.92
+#   etl/requirements.txt      boto3==1.43.92
+#   agent/...                 bedrock-agentcore==1.19.0            -> boto3>=1.43.31
+#                             bedrock-agentcore-starter-toolkit    -> boto3>=1.42.1
+#                             strands-agents==1.50.2               -> boto3>=1.26.0,<2
 #
-# Consequence to be aware of: the test environment runs a newer boto3 than
-# backend/ and etl/ deploy with. Aligning boto3 across the three deploy
-# manifests would let this file go back to pure composition.
+# Lowering the backend/etl pin below 1.43.31 reintroduces a conflict that pip
+# reports as ResolutionImpossible, which is what this file previously had to
+# work around by restating the dependencies instead of composing them.
 # ---------------------------------------------------------------------------
+
+# Backend and ETL runtime deps.
+-r backend/requirements.txt
+-r etl/requirements.txt
 
 # Agent runtime deps. Required, not optional: tests/test_agent_main.py,
 # test_github_tool.py, test_gitlab_tool.py, test_kiro_data_tool.py,
@@ -31,12 +35,6 @@
 # with no test stubbing them. Omitting this fails pytest *collection* with six
 # errors, before a single assertion runs.
 -r agent/app/GitCorrelationAgent/requirements.txt
-
-# Backend and ETL runtime deps. Restated rather than referenced, for the
-# conflict explained above. `requests` matches those manifests exactly; boto3
-# is the agent-compatible floor.
-boto3>=1.43.31
-requests==2.33.1
 
 # Test-only libraries. Exact pins so an upstream default-behaviour change
 # cannot surface as an unexplained failure on an unrelated pull request.

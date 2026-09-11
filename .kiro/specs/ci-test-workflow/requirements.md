@@ -51,7 +51,7 @@ Closing both gaps requires no new tests and no change to any existing test. Ever
 
 2.6. THE manifest SHALL NOT introduce a Lambda runtime dependency that no deploy manifest already declares.
 
-> **Amended after validation.** 2.2 and 2.3 originally required referencing all three deploy manifests and restating nothing. That is unsatisfiable: `backend/` and `etl/` pin `boto3==1.43.4` while the agent's `bedrock-agentcore==1.19.0` requires `boto3>=1.43.31`, and `pip` exits with `ResolutionImpossible`. See `design.md` §2.1.
+> **Amended after validation, then resolved.** 2.2 and 2.3 originally required referencing all three deploy manifests and restating nothing. That was unsatisfiable at the time: `backend/` and `etl/` pinned `boto3==1.43.4` while the agent's `bedrock-agentcore==1.19.0` requires `boto3>=1.43.31`, so `pip` exited with `ResolutionImpossible`, and 2.2 was widened to permit restating a pin where referencing was impossible. Task 6.6 has since aligned the deploy pins on `boto3==1.43.92`, so the manifest is pure composition and both criteria are met as originally written — 2.2's escape clause is now unused. It is kept rather than reverted so that a future conflict has a defined, documented outcome instead of an undefined one. See `design.md` §2.1.
 
 ## Requirement 3: The backend gate matches the deployed runtime
 

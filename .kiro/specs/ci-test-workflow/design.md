@@ -13,37 +13,37 @@ Two files are added and two are edited. Nothing under `tests/`, `backend/`, `etl
 
 ## 2. The test dependency manifest
 
-### 2.1 Composition was the intent, and it is not satisfiable
+### 2.1 Composition is satisfiable once the pins agree
 
 `tests/` imports both the test libraries and the runtime packages of every deployment unit. The intended shape composed the three deploy manifests with `-r`, so each stayed authoritative and a bump in one could not diverge from what CI installs.
 
-That combination does not resolve. `pip install` exits with `ResolutionImpossible`:
+That combination did not resolve when the workflow was first written. `backend/` and `etl/` pinned `boto3==1.43.4` while the agent's `bedrock-agentcore==1.19.0` required `boto3>=1.43.31`, so `pip install` exited with `ResolutionImpossible`. The manifest worked around it by referencing the agent and restating the other two with `boto3>=1.43.31`, which partially gave up Requirement 2.2 and left a fidelity gap: the suite ran a newer `boto3` than `backend/` and `etl/` deployed with.
+
+Task 6.6 removed the conflict at its source by aligning the deploy pins on the current `boto3` release, so the manifest is now pure composition:
 
 | Manifest | Pin | Effective boto3 constraint |
 |---|---|---|
-| `backend/requirements.txt` | `boto3==1.43.4` | `==1.43.4` |
-| `etl/requirements.txt` | `boto3==1.43.4` | `==1.43.4` |
+| `backend/requirements.txt` | `boto3==1.43.92` | `==1.43.92` |
+| `etl/requirements.txt` | `boto3==1.43.92` | `==1.43.92` |
 | `agent/.../requirements.txt` | `bedrock-agentcore==1.19.0` | `>=1.43.31` |
+| `agent/.../requirements.txt` | `bedrock-agentcore-starter-toolkit==0.3.11` | `>=1.42.1` |
 | `agent/.../requirements.txt` | `strands-agents==1.50.2` | `>=1.26.0,<2.0.0` |
 
-Each Lambda deployment package is built separately, so the three pins never meet at deploy time and this breaks no deploy. They do meet in a single test environment, and there they are mutually exclusive.
-
-The agent's floor wins, because its packages are imported at collection time by six test modules and cannot be skipped, whereas `boto3` is API-compatible across this range for what the tests exercise. So the manifest references the agent and restates the other two:
+Every agent constraint is a floor at or below the exact pin, so the exact pin satisfies all of them and nothing has to be restated:
 
 ```
+-r backend/requirements.txt
+-r etl/requirements.txt
 -r agent/app/GitCorrelationAgent/requirements.txt
-
-boto3>=1.43.31
-requests==2.33.1
 
 pytest==9.1.1
 moto==5.2.3
 hypothesis==6.167.1
 ```
 
-This partially gives up Requirement 2.2 and cannot satisfy 2.3 as originally written; both are amended in `requirements.md`. The consequence to keep in view is a fidelity gap: the suite runs a newer `boto3` (resolved to 1.43.89) than `backend/` and `etl/` deploy with. Verified after the change: 1002 tests collected with zero collection errors, and the failure set is identical to the one produced under the older `boto3`, so the newer resolution introduces no regression.
+Requirements 2.2 and 2.3 are therefore met as originally written, and the fidelity gap is closed: the test environment now installs exactly the `boto3` the Lambdas deploy with. Verified in a clean Python 3.13 virtual environment: `pip install -r requirements-dev.txt` exits 0 with no conflict, resolving `boto3` and `botocore` to 1.43.92, and the suite passes 1007 of 1007.
 
-Aligning `boto3` across the three deploy manifests would let this file return to pure composition. That is a change to deploy manifests and is deliberately not made here.
+The constraint to keep in view is inverted from before: lowering the `backend/`/`etl/` pin below `1.43.31` reintroduces `ResolutionImpossible`. Both the manifest and the tasks file record this, so a future downgrade fails loudly with a documented reason rather than mysteriously.
 
 ### 2.2 All three deploy manifests are required, including the agent's
 

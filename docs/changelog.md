@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+### Dependencies — `boto3` aligned across the three deploy manifests
+
+- **Change** — `backend/requirements.txt` and `etl/requirements.txt` move from `boto3==1.43.4` to `==1.43.92`, the current release. `requirements-dev.txt` now references all three deploy manifests and restates no pin of its own.
+- **Why** — the previous pins were mutually unsatisfiable with the agent manifest (`bedrock-agentcore==1.19.0` requires `boto3>=1.43.31`), so a single test environment could not honour both and `requirements-dev.txt` had to restate `boto3`/`requests` instead of composing. That left the suite running a different `boto3` than the Lambdas deploy with; the alignment closes that gap and makes each deploy manifest authoritative again.
+- **Verified** — in a clean Python 3.13 environment `pip install -r requirements-dev.txt` exits 0 with no conflict, resolving `boto3` and `botocore` to 1.43.92, and `pytest tests/ -q` passes 1007/1007.
+- **Constraint going forward** — dropping the `backend/`/`etl/` pin below `1.43.31` reintroduces `ResolutionImpossible`. Recorded in the manifest header and in the spec's task 6.6.
+
 ## v3.8.1 — CI test gates, pre-existing defect fixes and node24 actions (2026-09-09)
 
 ### CI — the existing test suites now run on every pull request
