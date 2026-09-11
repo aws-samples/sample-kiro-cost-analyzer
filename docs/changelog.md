@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## v3.9 — dependency pin alignment and frontend dev dependency bumps (2026-09-11)
+
 ### Dependencies — `boto3` aligned across the three deploy manifests
 
 - **Change** — `backend/requirements.txt` and `etl/requirements.txt` move from `boto3==1.43.4` to `==1.43.92`, the current release. `requirements-dev.txt` now references all three deploy manifests and restates no pin of its own.
