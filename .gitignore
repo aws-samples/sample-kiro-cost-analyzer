@@ -2,6 +2,12 @@
 node_modules/
 frontend/node_modules/
 
+# Python virtualenv. `make deploy-agentcore` requires the agentcore CLI in an
+# active venv and its preflight names `.venv` in the project root, so the
+# documented setup step would otherwise leave the working tree dirty.
+.venv/
+venv/
+
 # Build artifacts
 .aws-sam/
 frontend/dist/
