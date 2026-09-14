@@ -83,6 +83,20 @@ def _write_execution_record(execution_id, status, files_processed, records_writt
 
 Ordering matters: the SSM write stays first and unchanged, so the aggregate status card cannot regress (Req 2.6).
 
+### 3.1 Counter source amendment (2026-09)
+
+Production validation showed that the original counter path persisted values from only the final 500-file batch and read `writeResult` from the wrong level of the ResultWriter row. Step Functions stores each successful child output as a JSON string in top-level `Output`.
+
+The state machine now accumulates every batch manifest reference, and `RecordStatus` normalizes each successful `Output` before computing one whole-execution summary. That exact summary feeds both destinations:
+
+```text
+all batch manifests → normalized child outputs → one summary
+                                             ├─→ SSM latest status
+                                             └─→ DynamoDB EXEC# history item
+```
+
+This closes the possibility that the status card and execution-history row agree with each other but both contain a truncated or silently zeroed value. The external item shape and API remain unchanged; only counter correctness changes. Legacy single-manifest events remain accepted during rollout.
+
 ## 4. Frontend
 
 ### 4.1 New component — `frontend/src/components/EtlExecutionHistory.tsx`

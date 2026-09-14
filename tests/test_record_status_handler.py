@@ -8,7 +8,9 @@ import pytest
 
 from etl.record_status_handler import (
     _compute_summary,
+    _extract_manifest_references,
     _format_error,
+    _normalize_succeeded_item,
     record_status_handler,
 )
 
@@ -70,6 +72,51 @@ class TestComputeSummary:
         assert summary["totalRecords"] == 0
         assert summary["totalItemsWritten"] == 0
         assert summary["errors"] == []
+
+
+# ---------------------------------------------------------------------------
+# ResultWriter SUCCEEDED envelope normalization
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeSucceededItem:
+    def test_unwraps_real_result_writer_output(self):
+        item = {
+            "Status": "SUCCEEDED",
+            "Input": json.dumps({"key": "prompt.json.gz", "fileType": "prompt"}),
+            "Output": json.dumps({
+                "writeResult": {"recordCount": 2, "itemsWritten": 12},
+                "markResult": {"ok": True},
+            }),
+        }
+
+        assert _normalize_succeeded_item(item) == {
+            "writeResult": {"recordCount": 2, "itemsWritten": 12},
+            "markResult": {"ok": True},
+        }
+
+    @pytest.mark.parametrize(
+        ("output", "cause"),
+        [
+            ("not-json", "not valid JSON"),
+            (json.dumps([]), "not an object"),
+            (json.dumps({"markResult": {}}), "no writeResult"),
+        ],
+    )
+    def test_malformed_output_becomes_observable_failure(self, output, cause):
+        result = _normalize_succeeded_item({
+            "Input": json.dumps({"key": "bad.json.gz"}),
+            "Output": output,
+        })
+
+        assert result["status"] == "ERROR"
+        assert result["key"] == "bad.json.gz"
+        assert result["error"]["Error"] == "InvalidResultWriterOutput"
+        assert cause in result["error"]["Cause"]
+
+    def test_direct_legacy_write_result_remains_supported(self):
+        result = {"writeResult": {"recordCount": 1, "itemsWritten": 4}}
+        assert _normalize_succeeded_item(result) is result
 
 
 # ---------------------------------------------------------------------------
@@ -420,7 +467,12 @@ class TestRecordStatusHandlerManifestFailures:
     @patch.dict(os.environ, ENV_VARS)
     @patch("etl.record_status_handler.boto3")
     @patch("etl.record_status_handler._read_map_results_from_s3")
-    def test_manifest_read_raises_and_ssm_not_called(self, mock_read_s3, mock_boto3):
+    @patch("etl.record_status_handler.StructuredLogger")
+    def test_manifest_read_raises_and_ssm_not_called(
+        self, mock_logger_cls, mock_read_s3, mock_boto3
+    ):
+        mock_logger = MagicMock()
+        mock_logger_cls.return_value = mock_logger
         mock_ssm = MagicMock()
         mock_boto3.client.return_value = mock_ssm
         mock_read_s3.side_effect = Exception("S3 AccessDenied")
@@ -436,6 +488,16 @@ class TestRecordStatusHandlerManifestFailures:
             record_status_handler(event, None)
 
         mock_ssm.put_parameter.assert_not_called()
+        manifest_error = next(
+            call
+            for call in mock_logger.error.call_args_list
+            if call.args == ("Failed to read batch manifest",)
+        )
+        assert manifest_error.kwargs["manifestBucket"] == "data-bucket"
+        assert manifest_error.kwargs["manifestKey"] == "etl-results/manifest.json"
+        assert manifest_error.kwargs["errorType"] == "Exception"
+        assert manifest_error.kwargs["errorMessage"] == "S3 AccessDenied"
+        assert "Traceback" in manifest_error.kwargs["stackTrace"]
 
     @patch.dict(os.environ, ENV_VARS)
     @patch("etl.record_status_handler.boto3")
@@ -983,3 +1045,146 @@ class TestWriteExecutionRecordNeverRaises:
             logger=fake_logger,
             dynamodb_resource=stub_resource,
         )
+
+
+# ---------------------------------------------------------------------------
+# ResultWriter contract and multi-batch aggregation regressions
+# ---------------------------------------------------------------------------
+
+
+class TestResultWriterAggregationRegression:
+    @patch("etl.record_status_handler.boto3")
+    def test_succeeded_result_file_unwraps_real_aws_envelopes(self, mock_boto3):
+        from etl.record_status_handler import _read_map_results_from_s3
+
+        manifest = {
+            "ResultFiles": {
+                "SUCCEEDED": [{"Key": "SUCCEEDED_0.json"}],
+                "FAILED": [],
+            }
+        }
+        child_results = [
+            {
+                "Status": "SUCCEEDED",
+                "Input": json.dumps({"key": "one.csv", "fileType": "csv"}),
+                "Output": json.dumps({
+                    "writeResult": {"recordCount": 1, "itemsWritten": 6}
+                }),
+            },
+            {
+                "Status": "SUCCEEDED",
+                "Input": json.dumps({"key": "two.json.gz", "fileType": "prompt"}),
+                "Output": json.dumps({
+                    "writeResult": {"recordCount": 2, "itemsWritten": 12}
+                }),
+            },
+        ]
+
+        def fake_get_object(Bucket, Key):
+            body = MagicMock()
+            payload = manifest if Key == "manifest.json" else child_results
+            body.read.return_value = json.dumps(payload).encode("utf-8")
+            return {"Body": body}
+
+        mock_s3 = MagicMock()
+        mock_s3.get_object.side_effect = fake_get_object
+        mock_boto3.client.return_value = mock_s3
+
+        results, read_failures = _read_map_results_from_s3(
+            "bucket", "manifest.json"
+        )
+        summary = _compute_summary(results)
+
+        assert read_failures == 0
+        assert summary["filesSuccess"] == 2
+        assert summary["filesFailed"] == 0
+        assert summary["totalRecords"] == 3
+        assert summary["totalItemsWritten"] == 18
+
+    def test_manifest_accumulator_is_oldest_first_and_deduplicated(self):
+        event = {
+            "mapResultManifests": {
+                "previous": {
+                    "previous": [],
+                    "bucket": "data",
+                    "key": "batch-1/manifest.json",
+                },
+                "bucket": "data",
+                "key": "batch-2/manifest.json",
+            },
+            # A rolling-deploy payload may redundantly contain the last manifest.
+            "mapResultsBucket": "data",
+            "mapResultsKey": "batch-2/manifest.json",
+        }
+
+        assert _extract_manifest_references(event) == [
+            ("data", "batch-1/manifest.json"),
+            ("data", "batch-2/manifest.json"),
+        ]
+
+    @patch.dict(os.environ, ENV_VARS)
+    @patch("etl.record_status_handler.boto3")
+    @patch("etl.record_status_handler._read_map_results_from_s3")
+    def test_handler_aggregates_every_batch_manifest(self, mock_read_s3, mock_boto3):
+        mock_ssm = MagicMock()
+        mock_boto3.client.return_value = mock_ssm
+        mock_read_s3.side_effect = [
+            ([{"writeResult": {"recordCount": 2, "itemsWritten": 12}}], 0),
+            ([
+                {"writeResult": {"recordCount": 1, "itemsWritten": 6}},
+                {"writeResult": {"recordCount": 3, "itemsWritten": 18}},
+            ], 0),
+        ]
+        event = {
+            "executionId": "arn:aws:states:us-east-1:123:execution:etl:multi",
+            "listResult": {"newFilesCount": 2},
+            "mapResultManifests": {
+                "previous": {
+                    "previous": [],
+                    "bucket": "data",
+                    "key": "batch-1/manifest.json",
+                },
+                "bucket": "data",
+                "key": "batch-2/manifest.json",
+            },
+        }
+
+        result = record_status_handler(event, None)
+
+        assert result == {
+            "status": "SUCCESS",
+            "filesProcessed": 3,
+            "filesFailed": 0,
+            "recordsWritten": 36,
+            "errors": [],
+        }
+        assert [call.args[:2] for call in mock_read_s3.call_args_list] == [
+            ("data", "batch-1/manifest.json"),
+            ("data", "batch-2/manifest.json"),
+        ]
+
+    @patch.dict(os.environ, ENV_VARS)
+    @patch("etl.record_status_handler.boto3")
+    @patch("etl.record_status_handler._read_map_results_from_s3")
+    def test_legacy_single_manifest_event_remains_supported(
+        self, mock_read_s3, mock_boto3
+    ):
+        mock_boto3.client.return_value = MagicMock()
+        mock_read_s3.return_value = (
+            [{"writeResult": {"recordCount": 1, "itemsWritten": 6}}],
+            0,
+        )
+
+        result = record_status_handler(
+            {
+                "executionId": "legacy-execution",
+                "listResult": {"newFilesCount": 1},
+                "mapResultsBucket": "data",
+                "mapResultsKey": "legacy/manifest.json",
+            },
+            None,
+        )
+
+        assert result["filesProcessed"] == 1
+        assert result["recordsWritten"] == 6
+        mock_read_s3.assert_called_once()

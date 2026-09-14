@@ -50,7 +50,9 @@ A Standard state machine wraps a **Distributed Map** that runs **Express** child
 | 2 | **Parse** | Resolves the adapter from `fileType`, reads/parses/normalizes through it, resolves `userId → displayName` via IAM Identity Center with a `UserNamesTable` cache, and offloads prompt content over 4 KB to S3 before it can cross the Step Functions payload boundary. |
 | 3 | **Writer** | Dispatches by the adapter's record kind and persists normalized records to DynamoDB: dynamic `UpdateItem ADD` for source-present daily/global metrics, `PutItem` for prompt metadata, and `UpdateItem ADD` for model/trigger/category distributions. |
 | 4 | **MarkProcessed** | Direct Step Functions → DynamoDB `PutItem` task — no Lambda code. Marks the file processed with timestamp and record count. |
-| 5 | **RecordStatus** | Reads child-execution results from S3 (via `ResultWriter`), summarizes processed/failed counts, and writes the result to SSM Parameter Store for the dashboard to render. |
+| 5 | **RecordStatus** | Reads every batch manifest written to S3 by `ResultWriter`, unwraps each child execution's JSON-string `Output`, summarizes whole-execution processed/failed/write counts, and writes the result to SSM Parameter Store and execution history. |
+
+Before the first ListFiles call, the state machine initializes a small manifest-reference accumulator. Each `ProcessFiles` pass adds its `{bucket, key}` after the Distributed Map completes and before `hasMore` loops, so runs larger than the 500-file batch cap retain every batch without carrying child outputs in the Step Functions payload. `RecordStatus` also accepts the previous single-manifest event fields for executions already in flight during a deployment.
 
 ### Source-adapter seam
 

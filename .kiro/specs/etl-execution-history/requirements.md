@@ -11,7 +11,7 @@ There is also a wording problem. The success message after a manual run says the
 - **Execution**: one Step Functions execution of the ETL state machine, identified by its execution name.
 - **Terminal status**: a Step Functions execution status that will not change again — `SUCCEEDED`, `FAILED`, `ABORTED`, `TIMED_OUT`. `RUNNING` is the only non-terminal status.
 - **Elapsed time**: stop time minus start time for a finished execution; time since start for a running one.
-- **Execution record**: a DynamoDB item under `PK=ETL_STATUS`, `SK=EXEC#{executionName}`, holding the per-run counters (`filesProcessed`, `recordsWritten`) that Step Functions itself does not track.
+- **Execution record**: a DynamoDB item under `PK=ETL_STATUS`, `SK=EXEC#{executionName}`, holding the per-run counters (`filesProcessed`, `recordsWritten`) that Step Functions itself does not track. For backward compatibility, `recordsWritten` is the existing field name for total DynamoDB items written (`writeResult.itemsWritten`), not merely normalized input records.
 - **History window**: the trailing period the history table covers, in whole days, counted back from the moment of the request.
 
 ## Requirement 1: Wording of the manual-run feedback
@@ -45,6 +45,12 @@ There is also a wording problem. The success message after a manual run says the
 2.5. IF the execution-record write fails THEN the Lambda SHALL log the failure and still complete its SSM write successfully, so that a history-persistence problem never fails an otherwise successful ETL run.
 
 2.6. THE existing SSM parameter write SHALL keep its current payload shape and semantics, so the aggregate status card is unaffected.
+
+2.7. `filesProcessed` and `recordsWritten` SHALL represent the whole Step Functions execution across every `ProcessFiles` batch, not only the final batch.
+
+2.8. `recordsWritten` SHALL equal the sum of `writeResult.itemsWritten` from normalized successful child outputs. A missing or malformed ResultWriter `Output` SHALL NOT be persisted as a genuine zero.
+
+2.9. THE execution-history item and SSM parameter SHALL be computed from the same whole-execution summary.
 
 ## Requirement 3: Execution history endpoint
 

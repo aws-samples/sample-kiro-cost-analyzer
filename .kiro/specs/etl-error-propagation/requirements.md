@@ -9,7 +9,8 @@ This spec restores honest error signaling end-to-end: fatal errors fail the chil
 - **Child execution**: an Express workflow run by the `ProcessFiles` Distributed Map, processing a single source file.
 - **Transient error**: a retryable service-side error such as `Lambda.ServiceException`, `Lambda.TooManyRequestsException`, or DynamoDB throttling. Existing retry policies already handle these.
 - **Fatal error**: any non-transient error surfaced by Parse, Writer, or `MarkFileProcessed` — for example KMS `AccessDenied`, `ValidationException`, `ResourceNotFoundException`, JSON parsing errors, or unexpected Python exceptions.
-- **Map manifest**: the JSON object written by the Distributed Map `ResultWriter` at the end of the Map, pointing to `SUCCEEDED` / `FAILED` result files in S3.
+- **Batch manifest**: the JSON object written by one `ProcessFiles` Distributed Map invocation, pointing to `SUCCEEDED` / `FAILED` result files in S3. An ETL execution can produce multiple batch manifests when `hasMore=true`.
+- **Manifest accumulator**: the small linked value in the Standard execution state that retains every batch manifest reference until `RecordStatus` runs.
 - **Standard state machine**: the top-level `EtlStateMachine` (Standard workflow) that orchestrates `ListNewFiles → ProcessFiles (Map) → RecordStatus → Categorization`.
 
 ## Requirement 1: Fatal errors in child executions must surface as failures
@@ -56,13 +57,17 @@ This spec restores honest error signaling end-to-end: fatal errors fail the chil
 
 3.4. THE fallback that uses `listResult.newFilesCount` as `filesSuccess` when `map_results` is empty SHALL be removed, because it masks genuine read failures.
 
+3.5. WHEN an execution contains multiple `ProcessFiles` batches THEN `RecordStatus` SHALL fetch every unique batch manifest, and a fetch or parse failure in any one SHALL fail the summary rather than producing a partial SUCCESS.
+
+3.6. WHEN a `SUCCEEDED` result file contains the AWS execution envelope THEN `RecordStatus` SHALL parse its JSON-encoded `Output` object before computing counters. Missing, malformed, non-object, or `writeResult`-less output SHALL be represented as an `InvalidResultWriterOutput` file failure rather than a zero-valued success.
+
 ## Requirement 4: Summary must distinguish real successes from error payloads
 
 **User Story.** As an operator, I want `_compute_summary` to accurately count successes and failures, so that the SSM payload and dashboard reflect reality.
 
 ### Acceptance Criteria
 
-4.1. WHEN a child result is in the manifest's `SUCCEEDED` group AND contains no `error` field THEN IT SHALL be counted as a successful file.
+4.1. WHEN a child result is in the manifest's `SUCCEEDED` group THEN its JSON-encoded `Output` SHALL be normalized and counted as a successful file only when it contains a `writeResult` object. Direct pre-normalization payloads that already contain `writeResult` SHALL remain accepted during rollout.
 
 4.2. WHEN a child result is in the manifest's `FAILED` group OR contains an `error` field OR carries `status: "ERROR"` THEN IT SHALL be counted as a failed file and its error MUST be included in the `errors` list (truncated to the existing 200-character limit, first 10 only).
 
@@ -91,6 +96,20 @@ This spec restores honest error signaling end-to-end: fatal errors fail the chil
 6.2. WHEN a manifest read fails (per 3.1 or 3.2) THEN `RecordStatus` SHALL emit a structured log entry at level `ERROR` with fields `errorType`, `errorMessage`, `manifestBucket`, `manifestKey`, and `stackTrace`.
 
 6.3. Existing `INFO`-level logs (`Computing execution summary`, `Map results loaded`, `Execution status recorded`) SHALL be preserved.
+
+## Requirement 7: Summary covers the whole execution
+
+**User Story.** As an operator, I want counters and failures from every ListFiles batch represented once, so that runs larger than the 500-file batch cap are not truncated to their last batch.
+
+### Acceptance Criteria
+
+7.1. THE Standard state machine SHALL initialize a manifest accumulator before the first `ListNewFiles` call and SHALL append the `ResultWriterDetails` reference after every `ProcessFiles` Map, before evaluating `hasMore`.
+
+7.2. WHEN `RecordStatus` runs THEN it SHALL aggregate every unique accumulated manifest in processing order, summing successful files, failed files, parsed records and DynamoDB items without duplication.
+
+7.3. DURING a rolling deploy, `RecordStatus` SHALL continue accepting the legacy single-manifest `mapResultsBucket` / `mapResultsKey` event shape.
+
+7.4. THE zero-files path SHALL continue bypassing the `RecordStatus` Lambda and SHALL proceed to categorization and reconciliation unchanged.
 
 ## Out of scope
 
