@@ -13,6 +13,26 @@ except ImportError:
     from utils.sk_normalizer import normalize_sk_value
 
 
+_DECIMAL_METRICS = {"totalCredits", "overageCredits", "estimatedCostUsd"}
+
+
+def _metric_add_parts(metrics: dict[str, int | float | None]) -> tuple[list[str], dict]:
+    """Return DynamoDB ADD clauses/values for metrics that are present.
+
+    ``None`` means the source does not define the metric and therefore must not
+    materialize an attribute. Zero is a real value and is retained.
+    """
+    clauses: list[str] = []
+    values: dict = {}
+    for attribute, value in metrics.items():
+        if value is None:
+            continue
+        token = f":{attribute}"
+        clauses.append(f"{attribute} {token}")
+        values[token] = Decimal(str(value)) if attribute in _DECIMAL_METRICS else value
+    return clauses, values
+
+
 class AnalyticsWriter:
     """Encapsulates all DynamoDB write operations for the Analytics_Table.
 
@@ -90,36 +110,40 @@ class AnalyticsWriter:
         self,
         user_id: str,
         date: str,
-        credits: float,
-        overage: float,
-        messages: int,
-        conversations: int,
-        interactions: int,
+        credits: float | None,
+        overage: float | None,
+        messages: int | None,
+        conversations: int | None,
+        interactions: int | None,
         subscription_tier: str = "",
         client_type: str = "",
+        *,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        cache_read_tokens: int | None = None,
+        cache_write_tokens: int | None = None,
+        estimated_cost_usd: float | None = None,
     ) -> None:
-        """UpdateItem ADD for STATS#DAILY#{date}.
+        """Accumulate source-present metrics for ``STATS#DAILY#{date}``.
 
-        Also persists ``subscriptionTier`` and ``clientType`` via
-        unconditional ``SET`` so that tier/client upgrades are always
-        reflected.  Previous versions used ``if_not_exists`` which
-        prevented updates when a user changed tiers.
+        ``None`` denotes a metric this source does not define; zero remains a
+        real value. Tier and client type are unconditionally refreshed when
+        present so upgrades and source changes remain visible.
         """
-        update_parts = [
-            "ADD totalCredits :credits, "
-            "overageCredits :overage, "
-            "totalMessages :messages, "
-            "totalConversations :conversations, "
-            "totalInteractions :interactions",
-        ]
-        expr_values: dict = {
-            ":credits": Decimal(str(credits)),
-            ":overage": Decimal(str(overage)),
-            ":messages": messages,
-            ":conversations": conversations,
-            ":interactions": interactions,
-        }
+        add_clauses, expr_values = _metric_add_parts({
+            "totalCredits": credits,
+            "overageCredits": overage,
+            "totalMessages": messages,
+            "totalConversations": conversations,
+            "totalInteractions": interactions,
+            "inputTokens": input_tokens,
+            "outputTokens": output_tokens,
+            "cacheReadTokens": cache_read_tokens,
+            "cacheWriteTokens": cache_write_tokens,
+            "estimatedCostUsd": estimated_cost_usd,
+        })
 
+        update_parts: list[str] = []
         set_clauses: list[str] = []
         if subscription_tier:
             set_clauses.append("subscriptionTier = :tier")
@@ -129,7 +153,11 @@ class AnalyticsWriter:
             expr_values[":ctype"] = client_type
 
         if set_clauses:
-            update_parts.insert(0, "SET " + ", ".join(set_clauses))
+            update_parts.append("SET " + ", ".join(set_clauses))
+        if add_clauses:
+            update_parts.append("ADD " + ", ".join(add_clauses))
+        if not update_parts:
+            return
 
         self._table.update_item(
             Key={
@@ -348,36 +376,45 @@ class AnalyticsWriter:
     def increment_global_daily_stats(
         self,
         date: str,
-        credits: float,
-        overage: float,
-        messages: int,
-        conversations: int,
+        credits: float | None,
+        overage: float | None,
+        messages: int | None,
+        conversations: int | None,
         user_ids: set[str],
+        *,
+        interactions: int | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        cache_read_tokens: int | None = None,
+        cache_write_tokens: int | None = None,
+        estimated_cost_usd: float | None = None,
     ) -> None:
-        """UpdateItem ADD for GLOBAL / STATS#DAILY#{date}.
+        """Accumulate present metrics and unique users in the global daily item."""
+        add_clauses, expr_values = _metric_add_parts({
+            "totalCredits": credits,
+            "overageCredits": overage,
+            "totalMessages": messages,
+            "totalConversations": conversations,
+            "totalInteractions": interactions,
+            "inputTokens": input_tokens,
+            "outputTokens": output_tokens,
+            "cacheReadTokens": cache_read_tokens,
+            "cacheWriteTokens": cache_write_tokens,
+            "estimatedCostUsd": estimated_cost_usd,
+        })
+        if user_ids:
+            add_clauses.append("totalUsers :userIdSet")
+            expr_values[":userIdSet"] = user_ids
+        if not add_clauses:
+            return
 
-        Uses ADD with a DynamoDB String Set for totalUsers so that
-        unique user IDs accumulate across concurrent invocations.
-        """
         self._table.update_item(
             Key={
                 "PK": "GLOBAL",
                 "SK": f"STATS#DAILY#{date}",
             },
-            UpdateExpression=(
-                "ADD totalCredits :credits, "
-                "overageCredits :overage, "
-                "totalMessages :messages, "
-                "totalConversations :conversations, "
-                "totalUsers :userIdSet"
-            ),
-            ExpressionAttributeValues={
-                ":credits": Decimal(str(credits)),
-                ":overage": Decimal(str(overage)),
-                ":messages": messages,
-                ":conversations": conversations,
-                ":userIdSet": user_ids,
-            },
+            UpdateExpression="ADD " + ", ".join(add_clauses),
+            ExpressionAttributeValues=expr_values,
         )
 
     # ------------------------------------------------------------------
@@ -435,60 +472,99 @@ class AnalyticsWriter:
         self,
         date: str,
         tier: str,
-        credits: float,
-        overage: float,
-        messages: int,
-        conversations: int,
+        credits: float | None,
+        overage: float | None,
+        messages: int | None,
+        conversations: int | None,
+        *,
+        interactions: int | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        cache_read_tokens: int | None = None,
+        cache_write_tokens: int | None = None,
+        estimated_cost_usd: float | None = None,
     ) -> None:
-        """UpdateItem ADD for GLOBAL / STATS#TIER#{tier}#{date}."""
+        """Accumulate source-present metrics for a tier breakdown."""
         if not tier:
             return
-        self._table.update_item(
-            Key={
-                "PK": "GLOBAL",
-                "SK": f"STATS#TIER#{tier}#{date}",
-            },
-            UpdateExpression=(
-                "ADD totalCredits :credits, "
-                "overageCredits :overage, "
-                "totalMessages :messages, "
-                "totalConversations :conversations"
-            ),
-            ExpressionAttributeValues={
-                ":credits": Decimal(str(credits)),
-                ":overage": Decimal(str(overage)),
-                ":messages": messages,
-                ":conversations": conversations,
-            },
+        self._increment_global_breakdown(
+            f"STATS#TIER#{tier}#{date}",
+            credits,
+            overage,
+            messages,
+            conversations,
+            interactions=interactions,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
+            estimated_cost_usd=estimated_cost_usd,
         )
 
     def increment_global_client_type_stats(
         self,
         date: str,
         client_type: str,
-        credits: float,
-        overage: float,
-        messages: int,
-        conversations: int,
+        credits: float | None,
+        overage: float | None,
+        messages: int | None,
+        conversations: int | None,
+        *,
+        interactions: int | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        cache_read_tokens: int | None = None,
+        cache_write_tokens: int | None = None,
+        estimated_cost_usd: float | None = None,
     ) -> None:
-        """UpdateItem ADD for GLOBAL / STATS#CLIENT#{clientType}#{date}."""
+        """Accumulate source-present metrics for a client-type breakdown."""
         if not client_type:
             return
+        self._increment_global_breakdown(
+            f"STATS#CLIENT#{client_type}#{date}",
+            credits,
+            overage,
+            messages,
+            conversations,
+            interactions=interactions,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
+            estimated_cost_usd=estimated_cost_usd,
+        )
+
+    def _increment_global_breakdown(
+        self,
+        sort_key: str,
+        credits: float | None,
+        overage: float | None,
+        messages: int | None,
+        conversations: int | None,
+        *,
+        interactions: int | None,
+        input_tokens: int | None,
+        output_tokens: int | None,
+        cache_read_tokens: int | None,
+        cache_write_tokens: int | None,
+        estimated_cost_usd: float | None,
+    ) -> None:
+        add_clauses, expr_values = _metric_add_parts({
+            "totalCredits": credits,
+            "overageCredits": overage,
+            "totalMessages": messages,
+            "totalConversations": conversations,
+            "totalInteractions": interactions,
+            "inputTokens": input_tokens,
+            "outputTokens": output_tokens,
+            "cacheReadTokens": cache_read_tokens,
+            "cacheWriteTokens": cache_write_tokens,
+            "estimatedCostUsd": estimated_cost_usd,
+        })
+        if not add_clauses:
+            return
         self._table.update_item(
-            Key={
-                "PK": "GLOBAL",
-                "SK": f"STATS#CLIENT#{client_type}#{date}",
-            },
-            UpdateExpression=(
-                "ADD totalCredits :credits, "
-                "overageCredits :overage, "
-                "totalMessages :messages, "
-                "totalConversations :conversations"
-            ),
-            ExpressionAttributeValues={
-                ":credits": Decimal(str(credits)),
-                ":overage": Decimal(str(overage)),
-                ":messages": messages,
-                ":conversations": conversations,
-            },
+            Key={"PK": "GLOBAL", "SK": sort_key},
+            UpdateExpression="ADD " + ", ".join(add_clauses),
+            ExpressionAttributeValues=expr_values,
         )

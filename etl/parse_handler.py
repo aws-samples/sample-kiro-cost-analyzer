@@ -9,29 +9,22 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import traceback
 
 import boto3
 
-try:
-    from processors.csv_processor import process_csv
-    from processors.prompt_processor import process_prompts
-    from s3_reader import read_csv_content
-    from prompt_s3_reader import read_prompt_file
-    from path_resolver import resolve_path_metadata
-    from utils.name_resolver import resolve_names
+if __package__:
+    from .config import get_config
+    from .sources import resolve_adapter
+    from .sources.kiro_prompt_log import extract_path_metadata
+    from .sts_session import get_identity_store_client, get_s3_client
+    from .utils.name_resolver import resolve_names
+else:  # Lambda loads this module from CodeUri as a top-level handler.
     from config import get_config
-    from sts_session import get_s3_client, get_identity_store_client
-except ImportError:
-    from etl.processors.csv_processor import process_csv
-    from etl.processors.prompt_processor import process_prompts
-    from etl.s3_reader import read_csv_content
-    from etl.prompt_s3_reader import read_prompt_file
-    from etl.path_resolver import resolve_path_metadata
-    from etl.utils.name_resolver import resolve_names
-    from etl.config import get_config
-    from etl.sts_session import get_s3_client, get_identity_store_client
+    from sources import resolve_adapter
+    from sources.kiro_prompt_log import extract_path_metadata
+    from sts_session import get_identity_store_client, get_s3_client
+    from utils.name_resolver import resolve_names
 
 try:
     from shared.structured_logger import StructuredLogger
@@ -110,26 +103,8 @@ def _resolve_content_placement(
 
 
 def _extract_prompt_path_metadata(s3_key: str, prompts_prefix: str) -> dict:
-    """Extract region and accountId from a prompt file S3 key.
-
-    Path pattern:
-        {prompts_prefix}GenerateAssistantResponse/{region}/{year}/{month}/{day}/{hour}/*.json.gz
-
-    AccountId is extracted from the prompts_prefix
-    (e.g. ``prompts/AWSLogs/{accountId}/KiroLogs/``).
-    """
-    metadata: dict = {"region": "", "accountId": ""}
-
-    relative = s3_key.removeprefix(prompts_prefix)
-    parts = relative.split("/")
-    if len(parts) >= 2 and parts[0] == "GenerateAssistantResponse":
-        metadata["region"] = parts[1]
-
-    account_match = re.search(r"/(\d{12})/", prompts_prefix)
-    if account_match:
-        metadata["accountId"] = account_match.group(1)
-
-    return metadata
+    """Compatibility wrapper for callers predating the adapter seam."""
+    return extract_path_metadata(s3_key, prompts_prefix).as_prompt_mapping()
 
 
 def _collect_user_ids(records: list[dict]) -> set[str]:
@@ -164,8 +139,6 @@ def parse_handler(event, context):  # noqa: ARG001 - Lambda handler contract req
     # cross-account AccessDenied at GetObject time. Let it raise so Step
     # Functions retries the task with backoff.
     cfg = get_config()
-    source_prefix = cfg.source_prefix
-    prompts_prefix = cfg.prompts_prefix
     identity_store_id = cfg.identity_store_id
 
     # Obtain cross-account S3 client. get_s3_client returns None ONLY when no
@@ -203,12 +176,29 @@ def parse_handler(event, context):  # noqa: ARG001 - Lambda handler contract req
     )
 
     try:
-        if file_type == "csv":
-            records = _process_csv_file(bucket, key, source_prefix, logger, s3_client=cross_account_client)
-        elif file_type == "prompt":
-            records = _process_prompt_file(bucket, key, prompts_prefix, logger, s3_client=cross_account_client)
+        adapter = resolve_adapter(file_type)
+        if not adapter.claim(key, cfg):
+            logger.warning(
+                "Unclaimed source key, returning empty",
+                s3Key=key,
+                sourceType=adapter.source_type,
+            )
+            records = []
         else:
-            raise ValueError(f"Unknown fileType: {file_type}")
+            try:
+                content = adapter.read(bucket, key, s3_client=cross_account_client)
+            except Exception as exc:
+                if "AccessDenied" in type(exc).__name__ or "AccessDenied" in str(exc):
+                    logger.error(
+                        adapter.access_denied_message,
+                        bucket=bucket,
+                        key=key,
+                        errorType=type(exc).__name__,
+                    )
+                raise
+
+            parsed = adapter.parse(content, key, cfg)
+            records = adapter.normalize(parsed)
 
         # Resolve user names
         user_ids = _collect_user_ids(records)
@@ -225,7 +215,7 @@ def parse_handler(event, context):  # noqa: ARG001 - Lambda handler contract req
         # Must happen here, not in Writer, so an oversized prompt/response
         # never crosses the 256KB Step Functions Task payload limit between
         # Parse and Writer (see .kiro/specs/etl-parse-payload-size/).
-        if file_type == "prompt" and records:
+        if adapter.requires_content_placement and records:
             data_bucket = os.environ.get("DATA_BUCKET", "")
             _resolve_content_placement(records, data_bucket, _get_data_bucket_s3_client(), logger)
 
@@ -254,55 +244,6 @@ def parse_handler(event, context):  # noqa: ARG001 - Lambda handler contract req
         )
         raise
 
-
-def _process_csv_file(
-    bucket: str, key: str, source_prefix: str, logger: StructuredLogger, s3_client=None
-) -> list[dict]:
-    """Read and process a CSV activity file."""
-    metadata = resolve_path_metadata(key, source_prefix)
-    if metadata is None:
-        logger.warning("Unrecognised CSV path, returning empty", s3Key=key)
-        return []
-
-    try:
-        csv_content = read_csv_content(bucket, key, s3_client=s3_client)
-    except Exception as exc:
-        if "AccessDenied" in type(exc).__name__ or "AccessDenied" in str(exc):
-            # errorMessage/response deliberately omitted: a boto3
-            # AccessDenied error can echo the assumed role ARN and other
-            # cross-account request metadata. Only the error's class name
-            # and the bucket/key already known to the caller are logged.
-            logger.error(
-                "Acesso negado ao ler arquivo CSV. Verifique as permissões da Role_Origem.",
-                bucket=bucket,
-                key=key,
-                errorType=type(exc).__name__,
-            )
-        raise
-    format_type = metadata["format_type"]
-    return process_csv(csv_content, format_type, metadata)
-
-
-def _process_prompt_file(
-    bucket: str, key: str, prompts_prefix: str, logger: StructuredLogger, s3_client=None
-) -> list[dict]:
-    """Read and process a .json.gz prompt file."""
-    path_metadata = _extract_prompt_path_metadata(key, prompts_prefix)
-    try:
-        gzipped_content = read_prompt_file(bucket, key, s3_client=s3_client)
-    except Exception as exc:
-        if "AccessDenied" in type(exc).__name__ or "AccessDenied" in str(exc):
-            # errorMessage/response deliberately omitted — see the matching
-            # comment in _process_csv_file above.
-            logger.error(
-                "Acesso negado ao ler arquivo de prompt. Verifique as permissões da Role_Origem.",
-                bucket=bucket,
-                key=key,
-                errorType=type(exc).__name__,
-            )
-        raise
-    # Pass empty name_cache — names are resolved after processing
-    return process_prompts(gzipped_content, path_metadata, {})
 
 
 def _enrich_records_with_names(

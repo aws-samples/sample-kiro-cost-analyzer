@@ -15,18 +15,16 @@ from __future__ import annotations
 
 import os
 
-try:
+if __package__:
+    from .config import get_config
+    from .processing_tracker import filter_new_files, get_processed_keys
+    from .sources import discover_files
+    from .sts_session import get_s3_client
+else:  # Lambda loads this module from CodeUri as a top-level handler.
     from config import get_config
     from processing_tracker import filter_new_files, get_processed_keys
-    from prompt_s3_reader import list_prompt_files
-    from s3_reader import list_csv_files
+    from sources import discover_files
     from sts_session import get_s3_client
-except ImportError:
-    from etl.config import get_config
-    from etl.processing_tracker import filter_new_files, get_processed_keys
-    from etl.prompt_s3_reader import list_prompt_files
-    from etl.s3_reader import list_csv_files
-    from etl.sts_session import get_s3_client
 
 try:
     from shared.structured_logger import StructuredLogger
@@ -77,22 +75,23 @@ def list_handler(event, context):  # noqa: ARG001 - Lambda handler contract requ
             correlation_id=correlation_id,
         )
 
-        # List CSV files
-        csv_keys = list_csv_files(cfg.bucket_name, cfg.source_prefix, s3_client=cross_account_client)
-        logger.info("CSV files found", totalCsvFiles=len(csv_keys))
-
-        # List prompt files
-        prompt_keys: list[str] = []
-        if cfg.prompts_prefix:
-            prompt_keys = list_prompt_files(cfg.bucket_name, cfg.prompts_prefix, s3_client=cross_account_client)
-            logger.info("Prompt files found", totalPromptFiles=len(prompt_keys))
+        discovery = discover_files(
+            cfg.bucket_name,
+            cfg,
+            s3_client=cross_account_client,
+        )
+        for count_key, count in discovery.counts.items():
+            logger.info("Source files found", sourceCountKey=count_key, sourceFileCount=count)
+        for key in discovery.unclaimed_keys:
+            logger.warning("Unclaimed source key skipped", s3Key=key)
 
         # Get already-processed keys
         processed_keys = get_processed_keys(processed_table)
         logger.info("Processed keys loaded", processedCount=len(processed_keys))
 
-        # Combine all keys and filter new ones
-        all_keys = csv_keys + prompt_keys
+        # Preserve registry discovery order while filtering processed objects.
+        all_keys = [item.key for item in discovery.files]
+        adapter_by_key = {item.key: item.adapter for item in discovery.files}
         new_keys = filter_new_files(all_keys, processed_keys)
 
         total_new = len(new_keys)
@@ -101,24 +100,27 @@ def list_handler(event, context):  # noqa: ARG001 - Lambda handler contract requ
         batch_keys = new_keys[:MAX_BATCH_SIZE]
         has_more = total_new > MAX_BATCH_SIZE
 
-        # Build result list with full field names for Step Functions Map ItemSelector
-        csv_keys_set = set(csv_keys)
-        new_files = []
-        for key in batch_keys:
-            file_type = "csv" if key in csv_keys_set else "prompt"
-            new_files.append({
+        # Existing Kiro adapters deliberately emit their historical wire types
+        # (csv/prompt). Canonical names are accepted by Parse/Writer but are not
+        # emitted here, avoiding new-List/old-Parse rolling-deploy hazards.
+        new_files = [
+            {
                 "key": key,
-                "fileType": file_type,
-            })
+                "fileType": adapter_by_key[key].wire_type,
+            }
+            for key in batch_keys
+        ]
 
+        total_csv = discovery.counts.get("totalCsvFiles", 0)
+        total_prompt = discovery.counts.get("totalPromptFiles", 0)
         result = {
             "bucket": cfg.bucket_name,
             "newFiles": new_files,
             "newFilesCount": len(new_files),
             "totalNewFiles": total_new,
             "hasMore": has_more,
-            "totalCsvFiles": len(csv_keys),
-            "totalPromptFiles": len(prompt_keys),
+            "totalCsvFiles": total_csv,
+            "totalPromptFiles": total_prompt,
             "processedCount": len(processed_keys),
         }
 
@@ -127,8 +129,8 @@ def list_handler(event, context):  # noqa: ARG001 - Lambda handler contract requ
             newFilesCount=len(new_files),
             totalNewFiles=total_new,
             hasMore=has_more,
-            totalCsvFiles=len(csv_keys),
-            totalPromptFiles=len(prompt_keys),
+            totalCsvFiles=total_csv,
+            totalPromptFiles=total_prompt,
             processedCount=len(processed_keys),
         )
 

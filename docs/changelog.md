@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+### Refactor — extensible ETL source adapters (#55)
+
+- **Seam** — `ListFiles`, `Parse`, and `Writer` now resolve ordered `SourceAdapter` registrations instead of containing Kiro CSV/prompt dispatch ladders. The Kiro adapters own discovery, path claiming, reading, parsing, and normalization, so another source requires one adapter module plus one registry entry.
+- **Deploy compatibility** — `ListFiles` still emits `csv` / `prompt`; `Parse` and `Writer` also accept canonical `kiro_csv` / `kiro_prompt_log`, and `Parse` preserves the incoming `fileType` for executions already in flight.
+- **Writer extensibility** — activity records can carry optional token, cache, and estimated-cost metrics. Only source-present metrics are added to DynamoDB, so missing values remain absent and existing Kiro records retain their current credit/message attributes.
+- **Scope** — no Bedrock source, identity mapping, pricing, self-filtering, or frontend behavior is included; those remain follow-up work.
+- **Coverage** — property-based golden tests compare each adapter with the existing Kiro processors, with additional registry-invariant, deploy-window, discovery, handler, and optional-metric regressions.
+
 ### Fix — whole-execution ETL counters
 
 - **ResultWriter contract** — `RecordStatus` now unwraps the JSON-string `Output` from real Distributed Map success envelopes before reading `writeResult`; malformed success output becomes an observable file failure instead of a successful zero.

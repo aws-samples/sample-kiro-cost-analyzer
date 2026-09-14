@@ -46,13 +46,21 @@ A Standard state machine wraps a **Distributed Map** that runs **Express** child
 
 | # | Lambda | Responsibility |
 |---|---|---|
-| 1 | **ListFiles** | Lists CSVs and prompt logs in S3, queries `ProcessedFilesTable` to skip already-processed entries, returns up to 500 new files per batch. When `hasMore=true`, the state machine loops back. |
-| 2 | **Parse** | Reads the file from S3 (CSV or gzipped JSON), parses, normalizes records, and resolves `userId → displayName` via IAM Identity Center with a `UserNamesTable` cache. |
-| 3 | **Writer** | Persists normalized records to DynamoDB: `UpdateItem ADD` for daily and global stats, `PutItem` for prompt metadata, `UpdateItem ADD` for model/trigger/category distributions. Prompts whose combined content exceeds 4 KB are offloaded to S3. |
+| 1 | **ListFiles** | Asks the ordered source-adapter registry to discover and claim objects, queries `ProcessedFilesTable` to skip already-processed entries, and returns up to 500 new files per batch. When `hasMore=true`, the state machine loops back. |
+| 2 | **Parse** | Resolves the adapter from `fileType`, reads/parses/normalizes through it, resolves `userId → displayName` via IAM Identity Center with a `UserNamesTable` cache, and offloads prompt content over 4 KB to S3 before it can cross the Step Functions payload boundary. |
+| 3 | **Writer** | Dispatches by the adapter's record kind and persists normalized records to DynamoDB: dynamic `UpdateItem ADD` for source-present daily/global metrics, `PutItem` for prompt metadata, and `UpdateItem ADD` for model/trigger/category distributions. |
 | 4 | **MarkProcessed** | Direct Step Functions → DynamoDB `PutItem` task — no Lambda code. Marks the file processed with timestamp and record count. |
 | 5 | **RecordStatus** | Reads every batch manifest written to S3 by `ResultWriter`, unwraps each child execution's JSON-string `Output`, summarizes whole-execution processed/failed/write counts, and writes the result to SSM Parameter Store and execution history. |
 
 Before the first ListFiles call, the state machine initializes a small manifest-reference accumulator. Each `ProcessFiles` pass adds its `{bucket, key}` after the Distributed Map completes and before `hasMore` loops, so runs larger than the 500-file batch cap retain every batch without carrying child outputs in the Step Functions payload. `RecordStatus` also accepts the previous single-manifest event fields for executions already in flight during a deployment.
+
+### Source-adapter seam
+
+Source-specific discovery, path claiming, S3 reading, parsing, and normalization live in `etl/sources/`. `ListFiles`, `Parse`, and `Writer` depend only on the ordered registry and the `SourceAdapter` contract; adding a source requires one adapter module and one registry entry rather than edits to all three handlers. To extend the pipeline: implement the contract in a new module, add one instance to the ordered `REGISTRY` tuple, then add golden adapter and registry-dispatch tests for its canonical name, aliases, claims, and normalized output.
+
+Each adapter declares a canonical source type, deploy-window aliases, its Step Functions wire type, record kind (`activity` or `prompt`), and source capabilities such as prompt-content placement. The current Kiro adapters use canonical names `kiro_csv` and `kiro_prompt_log`, while `ListFiles` continues emitting the legacy wire values `csv` and `prompt`. `Parse` and `Writer` accept both forms, and `Parse` preserves the incoming `fileType`, so executions already in flight remain compatible while Lambda versions roll out.
+
+Discovery is deterministic: adapters are consulted in registry order, the first claim wins, and duplicate aliases or wire types fail registry construction. The analytics writer adds only metrics present in the normalized record. This preserves the existing Kiro credit/message attributes while allowing a future activity adapter to supply token/cache/cost metrics without changing shared writer dispatch; absent metrics are not materialized as zero.
 
 When `ListFiles` returns zero new files, the state machine takes a short-circuit path that writes a `RecordStatusNoFiles` SSM summary and then **rejoins the categorization and reconcile phases** below. The categorization pass runs on every execution so an admin can re-categorize prompts already in the table by manually resetting their `category` to `NOT_CATEGORIZED`, without re-ingesting source data.
 
