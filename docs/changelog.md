@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## v3.9.1 — ETL source adapters and complete RecordStatus aggregation (2026-09-14)
+
 ### Refactor — extensible ETL source adapters (#55)
 
 - **Seam** — `ListFiles`, `Parse`, and `Writer` now resolve ordered `SourceAdapter` registrations instead of containing Kiro CSV/prompt dispatch ladders. The Kiro adapters own discovery, path claiming, reading, parsing, and normalization, so another source requires one adapter module plus one registry entry.
