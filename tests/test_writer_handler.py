@@ -12,6 +12,7 @@ import pytest
 from moto import mock_aws
 
 from etl.writer_handler import (
+    _write_activity_record,
     _write_csv_record,
     _write_prompt_record,
     writer_handler,
@@ -92,6 +93,88 @@ class TestWriteCsvRecord:
         )["Item"]
         assert global_item["totalCredits"] == Decimal("10.5")
         assert global_item["totalUsers"] == {"user-1"}
+
+
+class TestWriteOptionalSourceMetrics:
+    def test_token_cost_record_does_not_materialize_credit_fields(self, aws_env, table):
+        """A non-credit source accumulates only metrics it actually defines."""
+        from shared.analytics_writer import AnalyticsWriter
+
+        dynamodb, s3 = aws_env
+        writer = AnalyticsWriter(
+            TABLE_NAME, DATA_BUCKET, dynamodb_resource=dynamodb, s3_client=s3
+        )
+        record = {
+            "userId": "bedrock-user",
+            "date": "2026-09-14",
+            "clientType": "CLAUDE_CODE",
+            "totalInteractions": 1,
+            "inputTokens": 1200,
+            "outputTokens": 300,
+            "cacheReadTokens": 800,
+            "cacheWriteTokens": 40,
+            "estimatedCostUsd": 0.0125,
+        }
+
+        items = _write_activity_record(writer, record, StructuredLogger("test"))
+
+        assert items == 4  # daily + global + client + activity summary
+        for key in (
+            {"PK": "USER#bedrock-user", "SK": "STATS#DAILY#2026-09-14"},
+            {"PK": "GLOBAL", "SK": "STATS#DAILY#2026-09-14"},
+            {"PK": "GLOBAL", "SK": "STATS#CLIENT#CLAUDE_CODE#2026-09-14"},
+        ):
+            item = table.get_item(Key=key)["Item"]
+            assert "totalCredits" not in item
+            assert "overageCredits" not in item
+            assert "totalMessages" not in item
+            assert "totalConversations" not in item
+            assert item["totalInteractions"] == 1
+            assert item["inputTokens"] == 1200
+            assert item["outputTokens"] == 300
+            assert item["cacheReadTokens"] == 800
+            assert item["cacheWriteTokens"] == 40
+            assert item["estimatedCostUsd"] == Decimal("0.0125")
+
+    def test_kiro_record_keeps_credit_attributes_and_no_token_fields(self, aws_env, table):
+        """The generalized path does not alter the existing Kiro item shape."""
+        from shared.analytics_writer import AnalyticsWriter
+
+        dynamodb, s3 = aws_env
+        writer = AnalyticsWriter(
+            TABLE_NAME, DATA_BUCKET, dynamodb_resource=dynamodb, s3_client=s3
+        )
+        record = {
+            "userId": "kiro-user",
+            "date": "2026-09-14",
+            "totalCredits": 2.5,
+            "overageCredits": 0.25,
+            "totalMessages": 4,
+            "totalConversations": 1,
+            "totalInteractions": 5,
+            "clientType": "KIRO_IDE",
+            "subscriptionTier": "PRO",
+        }
+
+        _write_activity_record(writer, record, StructuredLogger("test"))
+        item = table.get_item(
+            Key={"PK": "USER#kiro-user", "SK": "STATS#DAILY#2026-09-14"}
+        )["Item"]
+
+        assert item["totalCredits"] == Decimal("2.5")
+        assert item["overageCredits"] == Decimal("0.25")
+        assert item["totalMessages"] == 4
+        assert item["totalConversations"] == 1
+        assert item["totalInteractions"] == 5
+        assert item["clientType"] == "KIRO_IDE"
+        assert item["subscriptionTier"] == "PRO"
+        assert not {
+            "inputTokens",
+            "outputTokens",
+            "cacheReadTokens",
+            "cacheWriteTokens",
+            "estimatedCostUsd",
+        }.intersection(item)
 
 
 # ------------------------------------------------------------------
@@ -390,3 +473,22 @@ class TestWriterHandlerErrors:
             }
             with pytest.raises(RuntimeError, match="DynamoDB error"):
                 writer_handler(event, None)
+
+
+@pytest.mark.parametrize("file_type", ["kiro_csv", "kiro_prompt_log"])
+@patch.dict(os.environ, ENV_VARS)
+def test_writer_accepts_canonical_file_types(file_type, aws_env):
+    """Canonical names resolve during a rolling deploy, even for empty batches."""
+    with patch("etl.writer_handler.AnalyticsWriter"):
+        result = writer_handler(
+            {
+                "records": [],
+                "fileType": file_type,
+                "key": "key",
+                "correlationId": "deploy-window",
+            },
+            None,
+        )
+
+    assert result["recordCount"] == 0
+    assert result["itemsWritten"] == 0

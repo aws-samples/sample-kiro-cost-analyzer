@@ -28,6 +28,13 @@ def _make_config(bucket="my-bucket", source_prefix="activities/AWSLogs/123/KiroL
     return cfg
 
 
+def _csv_key(name: str) -> str:
+    return (
+        "activities/AWSLogs/123/KiroLogs/user_report/us-east-1/2026/09/14/00/"
+        f"KIRO_IDE_123456789012_user_report_{name}.csv"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Happy path — mixed CSV and prompt files
 # ---------------------------------------------------------------------------
@@ -35,16 +42,25 @@ def _make_config(bucket="my-bucket", source_prefix="activities/AWSLogs/123/KiroL
 class TestListHandlerHappyPath:
     @patch.dict(os.environ, ENV_VARS)
     @patch("etl.list_handler.get_processed_keys")
-    @patch("etl.list_handler.list_prompt_files")
-    @patch("etl.list_handler.list_csv_files")
+    @patch("etl.sources.kiro_prompt_log.list_prompt_files")
+    @patch("etl.sources.kiro_csv.list_csv_files")
     @patch("etl.list_handler.get_config")
     def test_returns_new_files_with_metadata(
         self, mock_config, mock_csv, mock_prompts, mock_processed
     ):
         mock_config.return_value = _make_config()
-        mock_csv.return_value = ["user_report/a.csv", "user_report/b.csv"]
-        mock_prompts.return_value = ["prompts/file1.json.gz", "prompts/file2.json.gz"]
-        mock_processed.return_value = {"user_report/a.csv", "prompts/file1.json.gz"}
+        prompt_prefix = "prompts/AWSLogs/123/KiroLogs/"
+        csv_a = _csv_key("202609140000")
+        csv_b = _csv_key("202609140100")
+        mock_csv.return_value = [csv_a, csv_b]
+        mock_prompts.return_value = [
+            f"{prompt_prefix}GenerateAssistantResponse/file1.json.gz",
+            f"{prompt_prefix}GenerateAssistantResponse/file2.json.gz",
+        ]
+        mock_processed.return_value = {
+            csv_a,
+            f"{prompt_prefix}GenerateAssistantResponse/file1.json.gz",
+        }
 
         result = list_handler({"correlationId": "exec-123"}, None)
 
@@ -57,18 +73,18 @@ class TestListHandlerHappyPath:
         assert len(new_files) == 2
 
         csv_file = next(f for f in new_files if f["fileType"] == "csv")
-        assert csv_file["key"] == "user_report/b.csv"
+        assert csv_file["key"] == csv_b
 
         prompt_file = next(f for f in new_files if f["fileType"] == "prompt")
-        assert prompt_file["key"] == "prompts/file2.json.gz"
+        assert prompt_file["key"] == f"{prompt_prefix}GenerateAssistantResponse/file2.json.gz"
 
         # bucket is at the top level, not per-file
         assert result["bucket"] == "my-bucket"
 
     @patch.dict(os.environ, ENV_VARS)
     @patch("etl.list_handler.get_processed_keys")
-    @patch("etl.list_handler.list_prompt_files")
-    @patch("etl.list_handler.list_csv_files")
+    @patch("etl.sources.kiro_prompt_log.list_prompt_files")
+    @patch("etl.sources.kiro_csv.list_csv_files")
     @patch("etl.list_handler.get_config")
     def test_all_files_already_processed(
         self, mock_config, mock_csv, mock_prompts, mock_processed
@@ -87,8 +103,8 @@ class TestListHandlerHappyPath:
 
     @patch.dict(os.environ, ENV_VARS)
     @patch("etl.list_handler.get_processed_keys")
-    @patch("etl.list_handler.list_prompt_files")
-    @patch("etl.list_handler.list_csv_files")
+    @patch("etl.sources.kiro_prompt_log.list_prompt_files")
+    @patch("etl.sources.kiro_csv.list_csv_files")
     @patch("etl.list_handler.get_config")
     def test_no_files_at_all(
         self, mock_config, mock_csv, mock_prompts, mock_processed
@@ -114,13 +130,16 @@ class TestListHandlerHappyPath:
 class TestListHandlerNoPrompts:
     @patch.dict(os.environ, ENV_VARS)
     @patch("etl.list_handler.get_processed_keys")
-    @patch("etl.list_handler.list_csv_files")
+    @patch("etl.sources.kiro_csv.list_csv_files")
     @patch("etl.list_handler.get_config")
     def test_skips_prompt_listing_when_no_prefix(
         self, mock_config, mock_csv, mock_processed
     ):
         mock_config.return_value = _make_config(prompts_prefix="")
-        mock_csv.return_value = ["a.csv", "b.csv"]
+        mock_csv.return_value = [
+            _csv_key("202609140000"),
+            _csv_key("202609140100"),
+        ]
         mock_processed.return_value = set()
 
         result = list_handler({}, None)
@@ -137,8 +156,8 @@ class TestListHandlerNoPrompts:
 class TestListHandlerEventHandling:
     @patch.dict(os.environ, ENV_VARS)
     @patch("etl.list_handler.get_processed_keys")
-    @patch("etl.list_handler.list_prompt_files")
-    @patch("etl.list_handler.list_csv_files")
+    @patch("etl.sources.kiro_prompt_log.list_prompt_files")
+    @patch("etl.sources.kiro_csv.list_csv_files")
     @patch("etl.list_handler.get_config")
     def test_handles_empty_event(
         self, mock_config, mock_csv, mock_prompts, mock_processed
@@ -153,8 +172,8 @@ class TestListHandlerEventHandling:
 
     @patch.dict(os.environ, ENV_VARS)
     @patch("etl.list_handler.get_processed_keys")
-    @patch("etl.list_handler.list_prompt_files")
-    @patch("etl.list_handler.list_csv_files")
+    @patch("etl.sources.kiro_prompt_log.list_prompt_files")
+    @patch("etl.sources.kiro_csv.list_csv_files")
     @patch("etl.list_handler.get_config")
     def test_handles_none_event(
         self, mock_config, mock_csv, mock_prompts, mock_processed
@@ -180,7 +199,7 @@ class TestListHandlerErrors:
             list_handler({}, None)
 
     @patch.dict(os.environ, ENV_VARS)
-    @patch("etl.list_handler.list_csv_files", side_effect=Exception("S3 access denied"))
+    @patch("etl.sources.kiro_csv.list_csv_files", side_effect=Exception("S3 access denied"))
     @patch("etl.list_handler.get_config")
     def test_s3_error_propagates(self, mock_config, _mock_csv):
         mock_config.return_value = _make_config()
@@ -195,14 +214,14 @@ class TestListHandlerErrors:
 class TestFileTypeClassification:
     @patch.dict(os.environ, ENV_VARS)
     @patch("etl.list_handler.get_processed_keys")
-    @patch("etl.list_handler.list_prompt_files")
-    @patch("etl.list_handler.list_csv_files")
+    @patch("etl.sources.kiro_prompt_log.list_prompt_files")
+    @patch("etl.sources.kiro_csv.list_csv_files")
     @patch("etl.list_handler.get_config")
     def test_csv_files_classified_correctly(
         self, mock_config, mock_csv, mock_prompts, mock_processed
     ):
         mock_config.return_value = _make_config()
-        mock_csv.return_value = ["report/data.csv"]
+        mock_csv.return_value = [_csv_key("202609140000")]
         mock_prompts.return_value = []
         mock_processed.return_value = set()
 
@@ -212,15 +231,17 @@ class TestFileTypeClassification:
 
     @patch.dict(os.environ, ENV_VARS)
     @patch("etl.list_handler.get_processed_keys")
-    @patch("etl.list_handler.list_prompt_files")
-    @patch("etl.list_handler.list_csv_files")
+    @patch("etl.sources.kiro_prompt_log.list_prompt_files")
+    @patch("etl.sources.kiro_csv.list_csv_files")
     @patch("etl.list_handler.get_config")
     def test_prompt_files_classified_correctly(
         self, mock_config, mock_csv, mock_prompts, mock_processed
     ):
         mock_config.return_value = _make_config()
         mock_csv.return_value = []
-        mock_prompts.return_value = ["prompts/log.json.gz"]
+        mock_prompts.return_value = [
+            "prompts/AWSLogs/123/KiroLogs/GenerateAssistantResponse/log.json.gz"
+        ]
         mock_processed.return_value = set()
 
         result = list_handler({}, None)

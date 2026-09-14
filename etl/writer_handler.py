@@ -11,6 +11,11 @@ import os
 import time
 
 from shared.analytics_writer import AnalyticsWriter
+
+if __package__:
+    from .sources import resolve_adapter
+else:  # Lambda loads this module from CodeUri as a top-level handler.
+    from sources import resolve_adapter
 from shared.categories import CATEGORY_NOT_CATEGORIZED
 from shared.structured_logger import StructuredLogger
 from shared.sk_normalizer import normalize_sk_value
@@ -53,13 +58,17 @@ def writer_handler(event, context):  # noqa: ARG001 - Lambda handler contract re
     items_written = 0
 
     try:
+        adapter = resolve_adapter(file_type)
         for record in records:
-            if file_type == "csv":
-                items_written += _write_csv_record(writer, record, logger)
-            elif file_type == "prompt":
+            if adapter.record_kind == "activity":
+                items_written += _write_activity_record(writer, record, logger)
+            elif adapter.record_kind == "prompt":
                 items_written += _write_prompt_record(writer, record, logger)
             else:
-                raise ValueError(f"Unknown fileType: {file_type}")
+                raise ValueError(
+                    f"Unsupported record kind for {adapter.source_type}: "
+                    f"{adapter.record_kind}"
+                )
 
         duration_ms = int((time.time() - start) * 1000)
 
@@ -94,26 +103,61 @@ def writer_handler(event, context):  # noqa: ARG001 - Lambda handler contract re
         raise
 
 
-def _write_csv_record(writer: AnalyticsWriter, record: dict, logger: StructuredLogger) -> int:
-    """Write a single CSV activity record. Returns number of items written."""
+def _write_activity_record(writer: AnalyticsWriter, record: dict, logger: StructuredLogger) -> int:
+    """Write one normalized activity record. Returns number of items written."""
     user_id = record["userId"]
     date = record["date"]
-    credits = float(record.get("totalCredits", 0))
-    overage = float(record.get("overageCredits", 0))
-    messages = int(record.get("totalMessages", 0))
-    conversations = int(record.get("totalConversations", 0))
-    interactions = int(record.get("totalInteractions", 0))
+
+    def present(key: str, cast):
+        return cast(record[key]) if key in record else None
+
+    credits = present("totalCredits", float)
+    overage = present("overageCredits", float)
+    messages = present("totalMessages", int)
+    conversations = present("totalConversations", int)
+    interactions = present("totalInteractions", int)
+    input_tokens = present("inputTokens", int)
+    output_tokens = present("outputTokens", int)
+    cache_read_tokens = present("cacheReadTokens", int)
+    cache_write_tokens = present("cacheWriteTokens", int)
+    estimated_cost_usd = present("estimatedCostUsd", float)
     tier = record.get("subscriptionTier", "")
     client_type = record.get("clientType", "")
 
+    optional_metrics = {
+        "interactions": interactions,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cache_read_tokens": cache_read_tokens,
+        "cache_write_tokens": cache_write_tokens,
+        "estimated_cost_usd": estimated_cost_usd,
+    }
+
     writer.increment_daily_stats(
-        user_id, date, credits, overage, messages, conversations, interactions,
+        user_id,
+        date,
+        credits,
+        overage,
+        messages,
+        conversations,
+        interactions,
         subscription_tier=tier,
         client_type=client_type,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
+        estimated_cost_usd=estimated_cost_usd,
     )
 
     writer.increment_global_daily_stats(
-        date, credits, overage, messages, conversations, {user_id},
+        date,
+        credits,
+        overage,
+        messages,
+        conversations,
+        {user_id},
+        **optional_metrics,
     )
 
     items = 2
@@ -121,14 +165,26 @@ def _write_csv_record(writer: AnalyticsWriter, record: dict, logger: StructuredL
     # Breakdown by tier
     if tier:
         writer.increment_global_tier_stats(
-            date, tier, credits, overage, messages, conversations,
+            date,
+            tier,
+            credits,
+            overage,
+            messages,
+            conversations,
+            **optional_metrics,
         )
         items += 1
 
     # Breakdown by client type
     if client_type:
         writer.increment_global_client_type_stats(
-            date, client_type, credits, overage, messages, conversations,
+            date,
+            client_type,
+            credits,
+            overage,
+            messages,
+            conversations,
+            **optional_metrics,
         )
         items += 1
 
@@ -160,6 +216,11 @@ def _write_csv_record(writer: AnalyticsWriter, record: dict, logger: StructuredL
             )
 
     return items
+
+
+def _write_csv_record(writer: AnalyticsWriter, record: dict, logger: StructuredLogger) -> int:
+    """Compatibility alias for callers predating the source-adapter seam."""
+    return _write_activity_record(writer, record, logger)
 
 
 def _write_prompt_record(writer: AnalyticsWriter, record: dict, logger: StructuredLogger) -> int:

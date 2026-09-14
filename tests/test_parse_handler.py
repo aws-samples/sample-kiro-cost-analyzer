@@ -1,5 +1,6 @@
 """Tests for etl.parse_handler module."""
 
+import gzip
 import json
 import os
 from unittest.mock import MagicMock, patch
@@ -173,13 +174,13 @@ class TestParseHandlerPromptPayloadSizeRegression:
     @patch("etl.parse_handler.get_s3_client", return_value=None)
     @patch("etl.parse_handler._get_data_bucket_s3_client")
     @patch("etl.parse_handler.resolve_names")
-    @patch("etl.parse_handler.process_prompts")
-    @patch("etl.parse_handler.read_prompt_file")
+    @patch("etl.sources.kiro_prompt_log.KiroPromptLogAdapter.normalize")
+    @patch("etl.sources.kiro_prompt_log.KiroPromptLogAdapter.read")
     def test_oversized_response_moved_to_s3_stays_under_task_limit(
         self, mock_read, mock_process, mock_names, mock_get_data_s3, _mock_s3, _mock_idc, mock_get_config,
     ):
         mock_get_config.return_value = _make_cfg()
-        mock_read.return_value = b"\x1f\x8b..."
+        mock_read.return_value = gzip.compress(json.dumps({"records": []}).encode())
         mock_data_s3 = MagicMock()
         mock_get_data_s3.return_value = mock_data_s3
 
@@ -236,9 +237,9 @@ class TestParseHandlerPromptPayloadSizeRegression:
     @patch("etl.parse_handler.get_identity_store_client", return_value=None)
     @patch("etl.parse_handler.get_s3_client", return_value=None)
     @patch("etl.parse_handler.resolve_names")
-    @patch("etl.parse_handler.process_csv")
-    @patch("etl.parse_handler.read_csv_content")
-    @patch("etl.parse_handler.resolve_path_metadata")
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.normalize")
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.read")
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.parse")
     def test_csv_records_are_not_touched_by_content_placement(
         self, mock_resolve_path, mock_read, mock_process, mock_names, _mock_s3, _mock_idc, mock_get_config,
     ):
@@ -253,7 +254,7 @@ class TestParseHandlerPromptPayloadSizeRegression:
 
         event = {
             "bucket": "my-bucket",
-            "key": "activities/AWSLogs/123/KiroLogs/user_report/us-east-1/2025/01/15/00/file.csv",
+            "key": "activities/AWSLogs/123456789012/KiroLogs/user_report/us-east-1/2025/01/15/00/file.csv",
             "fileType": "csv",
             "correlationId": "exec-csv",
         }
@@ -272,9 +273,9 @@ class TestParseHandlerCsv:
     @patch("etl.parse_handler.get_identity_store_client", return_value=None)
     @patch("etl.parse_handler.get_s3_client", return_value=None)
     @patch("etl.parse_handler.resolve_names")
-    @patch("etl.parse_handler.process_csv")
-    @patch("etl.parse_handler.read_csv_content")
-    @patch("etl.parse_handler.resolve_path_metadata")
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.normalize")
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.read")
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.parse")
     def test_csv_happy_path(
         self, mock_resolve_path, mock_read, mock_process, mock_names,
         _mock_s3, _mock_idc, mock_get_config,
@@ -289,7 +290,7 @@ class TestParseHandlerCsv:
 
         event = {
             "bucket": "my-bucket",
-            "key": "activities/AWSLogs/123/KiroLogs/user_report/us-east-1/2025/01/15/00/file.csv",
+            "key": "activities/AWSLogs/123456789012/KiroLogs/user_report/us-east-1/2025/01/15/00/file.csv",
             "fileType": "csv",
             "correlationId": "exec-123",
         }
@@ -304,22 +305,22 @@ class TestParseHandlerCsv:
     @patch("etl.parse_handler.get_config")
     @patch("etl.parse_handler.get_identity_store_client", return_value=None)
     @patch("etl.parse_handler.get_s3_client", return_value=None)
-    @patch("etl.parse_handler.resolve_path_metadata")
-    def test_csv_unrecognised_path_returns_empty(
-        self, mock_resolve_path, _mock_s3, _mock_idc, mock_get_config,
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.read")
+    def test_csv_unrecognised_path_returns_empty_without_reading_s3(
+        self, mock_read, _mock_s3, _mock_idc, mock_get_config,
     ):
         mock_get_config.return_value = _make_cfg()
-        mock_resolve_path.return_value = None
 
         event = {
             "bucket": "b",
-            "key": "unknown/path.csv",
+            "key": "activities/AWSLogs/123456789012/KiroLogs/user_report/too-short.csv",
             "fileType": "csv",
             "correlationId": "",
         }
         result = parse_handler(event, None)
         assert result["records"] == []
         assert result["recordCount"] == 0
+        mock_read.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -333,13 +334,13 @@ class TestParseHandlerPrompt:
     @patch("etl.parse_handler.get_s3_client", return_value=None)
     @patch("etl.parse_handler._get_data_bucket_s3_client")
     @patch("etl.parse_handler.resolve_names")
-    @patch("etl.parse_handler.process_prompts")
-    @patch("etl.parse_handler.read_prompt_file")
+    @patch("etl.sources.kiro_prompt_log.KiroPromptLogAdapter.normalize")
+    @patch("etl.sources.kiro_prompt_log.KiroPromptLogAdapter.read")
     def test_prompt_happy_path(
         self, mock_read, mock_process, mock_names, mock_get_data_s3, _mock_s3, _mock_idc, mock_get_config,
     ):
         mock_get_config.return_value = _make_cfg()
-        mock_read.return_value = b"\x1f\x8b..."
+        mock_read.return_value = gzip.compress(json.dumps({"records": []}).encode())
         mock_get_data_s3.return_value = MagicMock()
         mock_process.return_value = [
             {"userId": "u2", "requestId": "req-1", "displayName": "", "userName": "", "prompt": "hi", "response": "hey"},
@@ -365,7 +366,7 @@ class TestParseHandlerPrompt:
     @patch("etl.parse_handler.get_config")
     @patch("etl.parse_handler.get_identity_store_client", return_value=None)
     @patch("etl.parse_handler.get_s3_client")
-    @patch("etl.parse_handler.read_prompt_file")
+    @patch("etl.sources.kiro_prompt_log.KiroPromptLogAdapter.read")
     def test_prompt_uses_cross_account_client(
         self, mock_read, mock_get_s3, _mock_idc, mock_get_config,
     ):
@@ -416,15 +417,15 @@ class TestParseHandlerErrors:
     @patch("etl.parse_handler.get_config")
     @patch("etl.parse_handler.get_identity_store_client", return_value=None)
     @patch("etl.parse_handler.get_s3_client", return_value=None)
-    @patch("etl.parse_handler.read_csv_content", side_effect=Exception("S3 error"))
-    @patch("etl.parse_handler.resolve_path_metadata", return_value={"format_type": "new"})
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.read", side_effect=Exception("S3 error"))
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.parse", return_value={"format_type": "new"})
     def test_s3_error_propagates(
         self, _mock_path, _mock_read, _mock_s3, _mock_idc, mock_get_config,
     ):
         mock_get_config.return_value = _make_cfg()
         event = {
             "bucket": "b",
-            "key": "k",
+            "key": "activities/AWSLogs/123456789012/KiroLogs/user_report/us-east-1/2026/09/14/00/KIRO_IDE_123456789012_user_report_202609140000.csv",
             "fileType": "csv",
             "correlationId": "",
         }
@@ -438,7 +439,7 @@ class TestParseHandlerErrors:
         retries) — it must NOT be swallowed into single-account mode."""
         event = {
             "bucket": "b",
-            "key": "k",
+            "key": "activities/AWSLogs/123456789012/KiroLogs/user_report/us-east-1/2026/09/14/00/KIRO_IDE_123456789012_user_report_202609140000.csv",
             "fileType": "csv",
             "correlationId": "",
         }
@@ -478,9 +479,9 @@ class TestParseHandlerCrossAccountIdentityCenter:
 
     @patch.dict(os.environ, ENV_VARS)
     @patch("etl.parse_handler.resolve_names")
-    @patch("etl.parse_handler.process_csv")
-    @patch("etl.parse_handler.read_csv_content")
-    @patch("etl.parse_handler.resolve_path_metadata")
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.normalize")
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.read")
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.parse")
     @patch("etl.parse_handler.get_s3_client")
     @patch("etl.parse_handler.get_identity_store_client")
     @patch("etl.parse_handler.get_config")
@@ -515,7 +516,7 @@ class TestParseHandlerCrossAccountIdentityCenter:
 
         event = {
             "bucket": "my-bucket",
-            "key": "activities/AWSLogs/123/KiroLogs/user_report/us-east-1/2025/01/15/00/file.csv",
+            "key": "activities/AWSLogs/123456789012/KiroLogs/user_report/us-east-1/2025/01/15/00/file.csv",
             "fileType": "csv",
             "correlationId": "exec-idc-xa",
         }
@@ -537,9 +538,9 @@ class TestParseHandlerCrossAccountIdentityCenter:
 
     @patch.dict(os.environ, ENV_VARS)
     @patch("etl.parse_handler.resolve_names")
-    @patch("etl.parse_handler.process_csv")
-    @patch("etl.parse_handler.read_csv_content")
-    @patch("etl.parse_handler.resolve_path_metadata")
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.normalize")
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.read")
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.parse")
     @patch("etl.parse_handler.get_s3_client")
     @patch("etl.parse_handler.get_identity_store_client")
     @patch("etl.parse_handler.get_config")
@@ -572,7 +573,7 @@ class TestParseHandlerCrossAccountIdentityCenter:
 
         event = {
             "bucket": "my-bucket",
-            "key": "activities/AWSLogs/123/KiroLogs/user_report/us-east-1/2025/01/15/00/file.csv",
+            "key": "activities/AWSLogs/123456789012/KiroLogs/user_report/us-east-1/2025/01/15/00/file.csv",
             "fileType": "csv",
             "correlationId": "exec-idc-single",
         }
@@ -587,9 +588,9 @@ class TestParseHandlerCrossAccountIdentityCenter:
 
     @patch.dict(os.environ, ENV_VARS)
     @patch("etl.parse_handler.resolve_names")
-    @patch("etl.parse_handler.process_csv")
-    @patch("etl.parse_handler.read_csv_content")
-    @patch("etl.parse_handler.resolve_path_metadata")
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.normalize")
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.read")
+    @patch("etl.sources.kiro_csv.KiroCsvAdapter.parse")
     @patch("etl.parse_handler.get_s3_client")
     @patch("etl.parse_handler.get_identity_store_client")
     @patch("etl.parse_handler.get_config")
@@ -622,7 +623,7 @@ class TestParseHandlerCrossAccountIdentityCenter:
 
         event = {
             "bucket": "my-bucket",
-            "key": "activities/AWSLogs/123/KiroLogs/user_report/us-east-1/2025/01/15/00/file.csv",
+            "key": "activities/AWSLogs/123456789012/KiroLogs/user_report/us-east-1/2025/01/15/00/file.csv",
             "fileType": "csv",
             "correlationId": "exec-idc-fallback",
         }
@@ -639,3 +640,27 @@ class TestParseHandlerCrossAccountIdentityCenter:
         # Pipeline continues — handler returns a result envelope as usual
         assert result["fileType"] == "csv"
         assert result["recordCount"] == 1
+
+
+@pytest.mark.parametrize("file_type", ["kiro_csv", "kiro_prompt_log"])
+@patch.dict(os.environ, ENV_VARS)
+@patch("etl.parse_handler.get_config")
+@patch("etl.parse_handler.get_identity_store_client", return_value=None)
+@patch("etl.parse_handler.get_s3_client", return_value=None)
+def test_parse_accepts_canonical_file_types(
+    _mock_s3, _mock_idc, mock_get_config, file_type
+):
+    """New canonical names are accepted while preserving the input wire value."""
+    mock_get_config.return_value = _make_cfg()
+    result = parse_handler(
+        {
+            "bucket": "my-bucket",
+            "key": "unclaimed/key",
+            "fileType": file_type,
+            "correlationId": "deploy-window",
+        },
+        None,
+    )
+
+    assert result["fileType"] == file_type
+    assert result["records"] == []
