@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+### Fix — whole-execution ETL counters
+
+- **ResultWriter contract** — `RecordStatus` now unwraps the JSON-string `Output` from real Distributed Map success envelopes before reading `writeResult`; malformed success output becomes an observable file failure instead of a successful zero.
+- **Multiple batches** — every 500-file `ProcessFiles` batch contributes its manifest to a small execution-state accumulator, so `filesProcessed`, `filesFailed`, and `recordsWritten` cover the whole run rather than only the final batch.
+- **Compatibility** — the SSM and DynamoDB schemas are unchanged, and the Lambda still accepts the previous single-manifest event shape for executions already in flight during deployment.
+- **Root cause** — both defects were present from the initial implementation and were exposed by production validation: a four-batch run wrote 11,496 DynamoDB items while the status record reported only the final 358 files and zero writes.
+
 ## v3.9 — dependency pin alignment and frontend dev dependency bumps (2026-09-11)
 
 ### Dependencies — `boto3` aligned across the three deploy manifests

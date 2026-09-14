@@ -120,6 +120,29 @@ These are the behavior-changing edits. After this checkpoint, the state machine 
 
 ---
 
+## Checkpoint 5 — 2026-09 ResultWriter contract correction
+
+Production validation after issue #55 exposed latent defects from the initial implementation: successful results are wrapped in JSON-string `Output`, and repeated `ProcessFiles` batches overwrite the previous manifest reference.
+
+- [x] **5.1** Normalize real ResultWriter `SUCCEEDED` envelopes and convert malformed output into `InvalidResultWriterOutput` failures; retain direct `writeResult` compatibility.
+  - _Requirements: 3.6, 4.1, 4.2, 7.3_
+
+- [x] **5.2** Initialize and update a manifest-reference accumulator around every `ProcessFiles` batch; pass it to `RecordStatus` without changing the zero-files path.
+  - _Requirements: 7.1, 7.4_
+
+- [x] **5.3** Aggregate every unique manifest in order and preserve the legacy single-manifest event shape.
+  - _Requirements: 3.5, 7.2, 7.3_
+
+- [x] **5.4** Add real-envelope, malformed-output, multi-batch, de-duplication, legacy-event, and structural state-machine tests.
+  - _Requirements: 3.5, 3.6, 4.1, 7.1–7.4_
+
+- [x] **5.5** Run focused and full backend gates plus `sam build`; validate against the four production manifests captured from `manual-source-adapter-20260914T180058Z` (expected 1,858 files and 11,496 items).
+  - _Requirements: 4.3, 7.2_
+
+**Validation checkpoint 5**: complete — 55 focused tests and 1,020 full backend tests passed; `sam validate` and `sam build` succeeded; read-only replay produced batches `[500, 500, 500, 358]`, 1,858 successful files, 1,916 normalized records, 11,496 DynamoDB items, and zero failures.
+
+---
+
 ## Task → Requirement traceability matrix
 
 | Task | Requirements covered |

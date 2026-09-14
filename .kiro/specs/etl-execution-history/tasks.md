@@ -102,3 +102,19 @@ Requirements referenced per task using `_Requirements: N.M_`.
 
 - [x] **5.4** Verify in the deployed stack: the new endpoint returns executions, and the ETL tab renders the history table.
   - _Requirements: 3.1, 4.1_
+
+
+## Checkpoint 6 — Whole-execution counter correction (2026-09)
+
+- [x] **6.1** Normalize AWS ResultWriter `Output` envelopes before reading `writeResult.itemsWritten`.
+  - _Requirements: 2.8_
+
+- [x] **6.2** Accumulate and aggregate every `ProcessFiles` batch manifest while preserving legacy single-manifest events.
+  - _Requirements: 2.7, 2.9_
+
+- [x] **6.3** Add regression tests proving SSM and execution-history records receive the same multi-batch total.
+  - _Requirements: 2.7–2.9_
+
+- [x] **6.4** Complete full test/build gates and replay the known four-manifest production execution to verify `filesProcessed=1858` and `recordsWritten=11496`.
+  - _Requirements: 2.7–2.9_
+  - _Validation: 1,020 backend tests passed; SAM validation/build succeeded; read-only replay returned `filesProcessed=1858`, `filesFailed=0`, `totalRecords=1916`, and `recordsWritten=11496`._

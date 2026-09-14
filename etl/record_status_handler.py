@@ -63,11 +63,66 @@ def _read_map_results_from_s3(
                 continue
 
             items = child_results if isinstance(child_results, list) else [child_results]
-            if group == "FAILED":
-                items = [_normalize_failed_item(r) for r in items if isinstance(r, dict)]
+            if group == "SUCCEEDED":
+                items = [_normalize_succeeded_item(r) for r in items]
+            else:
+                items = [
+                    _normalize_failed_item(r if isinstance(r, dict) else {})
+                    for r in items
+                ]
             results.extend(items)
 
     return results, read_failures
+
+
+def _result_input_key(item: dict) -> str:
+    """Extract the source key from a ResultWriter execution envelope."""
+    try:
+        parsed_input = json.loads(item.get("Input", "{}"))
+    except (json.JSONDecodeError, TypeError):
+        return "unknown"
+    return parsed_input.get("key", "unknown") if isinstance(parsed_input, dict) else "unknown"
+
+
+def _invalid_succeeded_item(item: dict, cause: str) -> dict:
+    """Represent malformed SUCCEEDED output as an observable file failure."""
+    return {
+        "status": "ERROR",
+        "key": _result_input_key(item),
+        "error": {
+            "Error": "InvalidResultWriterOutput",
+            "Cause": cause,
+        },
+    }
+
+
+def _normalize_succeeded_item(item) -> dict:
+    """Unwrap one AWS ResultWriter SUCCEEDED execution envelope.
+
+    ResultWriter stores child output in the top-level ``Output`` field as a
+    JSON string. Direct ``writeResult`` payloads remain accepted for rolling
+    deploys and tests written against the pre-normalization contract.
+    """
+    if not isinstance(item, dict):
+        return _invalid_succeeded_item({}, "SUCCEEDED result is not an object")
+
+    if "Output" not in item:
+        if isinstance(item.get("writeResult"), dict):
+            return item
+        return _invalid_succeeded_item(item, "SUCCEEDED result has no Output field")
+
+    output = item["Output"]
+    if isinstance(output, str):
+        try:
+            output = json.loads(output)
+        except json.JSONDecodeError:
+            return _invalid_succeeded_item(item, "SUCCEEDED Output is not valid JSON")
+
+    if not isinstance(output, dict):
+        return _invalid_succeeded_item(item, "SUCCEEDED Output is not an object")
+    if not isinstance(output.get("writeResult"), dict):
+        return _invalid_succeeded_item(item, "SUCCEEDED Output has no writeResult object")
+    return output
 
 
 def _normalize_failed_item(item: dict) -> dict:
@@ -77,12 +132,10 @@ def _normalize_failed_item(item: dict) -> dict:
     string). We convert to ``{status, key, error: {Cause, Error}}`` so downstream code
     can extract the file key and format a readable error message.
     """
-    normalized: dict = {"status": "ERROR"}
-    try:
-        parsed_input = json.loads(item.get("Input", "{}"))
-        normalized["key"] = parsed_input.get("key", "unknown")
-    except (json.JSONDecodeError, TypeError):
-        normalized["key"] = "unknown"
+    normalized: dict = {
+        "status": "ERROR",
+        "key": _result_input_key(item),
+    }
     normalized["error"] = {
         "Cause": item.get("Cause", ""),
         "Error": item.get("Error", ""),
@@ -230,22 +283,62 @@ def _write_execution_record(
         )
 
 
+def _extract_manifest_references(event: dict) -> list[tuple[str, str]]:
+    """Return every unique batch manifest in processing order.
+
+    New state-machine executions pass a recursively linked
+    ``mapResultManifests`` accumulator. Executions started under the previous
+    definition still send one ``mapResultsBucket``/``mapResultsKey`` pair.
+    """
+    references: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def visit(node) -> None:
+        if isinstance(node, list):
+            for child in node:
+                visit(child)
+            return
+        if not isinstance(node, dict):
+            return
+
+        # The accumulator is a linked structure: visit older batches first.
+        visit(node.get("previous"))
+        visit(node.get("manifests"))
+
+        bucket = node.get("bucket", node.get("Bucket", ""))
+        key = node.get("key", node.get("Key", ""))
+        reference = (bucket, key)
+        if bucket and key and reference not in seen:
+            seen.add(reference)
+            references.append(reference)
+
+    visit(event.get("mapResultManifests"))
+
+    legacy = (event.get("mapResultsBucket", ""), event.get("mapResultsKey", ""))
+    if legacy[0] and legacy[1] and legacy not in seen:
+        references.append(legacy)
+
+    return references
+
+
 def record_status_handler(event, context):  # noqa: ARG001 - Lambda handler contract requires context parameter
     """RecordStatus Lambda entry point.
 
-    Event from Step Functions (Distributed Map)::
+    New executions provide every batch manifest through
+    ``mapResultManifests``. During a rolling deploy, executions started under
+    the old definition may still provide one legacy bucket/key pair::
 
         {
             "executionId": "arn:aws:states:...",
             "listResult": { ... },
+            "mapResultManifests": { ... },
             "mapResultsBucket": "data-bucket",
             "mapResultsKey": "etl-results/.../manifest.json"
         }
     """
     execution_id = event.get("executionId", "")
     list_result = event.get("listResult", {})
-    results_bucket = event.get("mapResultsBucket", "")
-    results_key = event.get("mapResultsKey", "")
+    manifest_references = _extract_manifest_references(event)
 
     logger = StructuredLogger("record-status-lambda", execution_id)
     ssm_param = os.environ.get("SSM_ETL_STATUS", "")
@@ -253,22 +346,35 @@ def record_status_handler(event, context):  # noqa: ARG001 - Lambda handler cont
     logger.info(
         "Computing execution summary",
         newFilesCount=list_result.get("newFilesCount", 0),
-        resultsBucket=results_bucket,
-        resultsKey=results_key,
+        manifestCount=len(manifest_references),
     )
 
     try:
-        # Read child execution results from S3. Manifest read failures propagate —
-        # we must not convert them into a false-positive success.
+        # Read every batch manifest. A manifest failure propagates so a partial
+        # run can never be reported as a successful whole execution.
         map_results: list[dict] = []
         read_failures = 0
-        if results_bucket and results_key:
-            map_results, read_failures = _read_map_results_from_s3(
-                results_bucket, results_key, logger
-            )
+        for results_bucket, results_key in manifest_references:
+            try:
+                batch_results, batch_read_failures = _read_map_results_from_s3(
+                    results_bucket, results_key, logger
+                )
+            except Exception as exc:
+                logger.error(
+                    "Failed to read batch manifest",
+                    manifestBucket=results_bucket,
+                    manifestKey=results_key,
+                    errorType=type(exc).__name__,
+                    errorMessage=str(exc),
+                    stackTrace=traceback.format_exc(),
+                )
+                raise
+            map_results.extend(batch_results)
+            read_failures += batch_read_failures
 
         logger.info(
             "Map results loaded",
+            manifestCount=len(manifest_references),
             mapResultsCount=len(map_results),
             readFailures=read_failures,
         )
