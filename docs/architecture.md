@@ -50,7 +50,9 @@ A Standard state machine wraps a **Distributed Map** that runs **Express** child
 | 2 | **Parse** | Reads the file from S3 (CSV or gzipped JSON), parses, normalizes records, and resolves `userId → displayName` via IAM Identity Center with a `UserNamesTable` cache. |
 | 3 | **Writer** | Persists normalized records to DynamoDB: `UpdateItem ADD` for daily and global stats, `PutItem` for prompt metadata, `UpdateItem ADD` for model/trigger/category distributions. Prompts whose combined content exceeds 4 KB are offloaded to S3. |
 | 4 | **MarkProcessed** | Direct Step Functions → DynamoDB `PutItem` task — no Lambda code. Marks the file processed with timestamp and record count. |
-| 5 | **RecordStatus** | Reads child-execution results from S3 (via `ResultWriter`), summarizes processed/failed counts, and writes the result to SSM Parameter Store for the dashboard to render. |
+| 5 | **RecordStatus** | Reads every batch manifest written to S3 by `ResultWriter`, unwraps each child execution's JSON-string `Output`, summarizes whole-execution processed/failed/write counts, and writes the result to SSM Parameter Store and execution history. |
+
+Before the first ListFiles call, the state machine initializes a small manifest-reference accumulator. Each `ProcessFiles` pass adds its `{bucket, key}` after the Distributed Map completes and before `hasMore` loops, so runs larger than the 500-file batch cap retain every batch without carrying child outputs in the Step Functions payload. `RecordStatus` also accepts the previous single-manifest event fields for executions already in flight during a deployment.
 
 When `ListFiles` returns zero new files, the state machine takes a short-circuit path that writes a `RecordStatusNoFiles` SSM summary and then **rejoins the categorization and reconcile phases** below. The categorization pass runs on every execution so an admin can re-categorize prompts already in the table by manually resetting their `category` to `NOT_CATEGORIZED`, without re-ingesting source data.
 

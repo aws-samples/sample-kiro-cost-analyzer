@@ -208,8 +208,9 @@ The return dict keeps the same keys (`status`, `filesProcessed`, `filesFailed`, 
 |---|---|
 | `ProcessedFilesTable` entries | Unchanged. Only successful files are marked. |
 | SSM `/kiro-cost-analyzer/etl-status` payload | Unchanged (same keys, same truncation rules). |
-| Map manifest shape | Produced by Step Functions — unchanged. |
-| `RecordStatus` return value | Unchanged keys. `filesFailed` now reflects FAILED-group children + SUCCEEDED-group error payloads + read failures. |
+| Map manifest shape | Produced by Step Functions — unchanged. Each successful row's JSON-encoded `Output` is normalized before summary computation. |
+| Manifest accumulator | New internal Standard-state value containing every batch's S3 manifest reference; never exposed through the API or dashboard. |
+| `RecordStatus` return value | Unchanged keys. Counters now cover every batch; `filesFailed` reflects FAILED-group children + malformed SUCCEEDED output + legacy error payloads + read failures. |
 | Dashboard API | Unchanged. Reads SSM as today. |
 
 ## Error Handling Matrix
@@ -238,6 +239,34 @@ Property-based tests (Hypothesis) validate the following invariants on `_compute
 6. **Manifest read propagation**: if `s3.get_object(manifest_key)` raises, `_read_map_results_from_s3` raises with the same exception class. If an individual child result raises, it is counted as one `read_failure` and does not abort the function.
 
 Existing tests in `tests/test_record_status_handler.py` (4 unit tests on `_compute_summary`, 5 on `_format_error`, plus `TestRecordStatusHandlerHappyPath`) remain valid after the minor signature change on `_read_map_results_from_s3` — they mock it directly, so only the tests that assert `return []` on read failure need to be updated (there are none today; the current behavior is untested).
+
+## 2026-09 amendment — ResultWriter envelope and multi-batch counters
+
+Production validation exposed two assumptions present since the initial implementation:
+
+1. A `SUCCEEDED_*.json` row is an execution envelope whose child result is in `Output` as a JSON string; it is not the child result directly.
+2. Every pass through `ProcessFiles` overwrote `$.mapResults`, so `RecordStatus` received only the final batch when `hasMore=true`.
+
+The corrected success path is:
+
+```text
+InitializeMapResultManifests ([])
+  → ListNewFiles → ProcessFiles
+  → AccumulateMapResultManifest {previous, bucket, key}
+  → hasMore? repeat ListNewFiles : RecordStatus(all manifests)
+```
+
+The linked accumulator stores only S3 manifest references, so its state growth is bounded by the number of 500-file batches rather than by file count or child output size. `RecordStatus` walks older nodes first and de-duplicates `(bucket, key)` pairs.
+
+For each `SUCCEEDED` row, `_normalize_succeeded_item` parses `Output`, requires an object with a `writeResult` object, and then supplies that object to `_compute_summary`. A malformed success envelope is converted to the same internal failure shape used elsewhere, with `Error: InvalidResultWriterOutput`; it cannot silently contribute one successful file and zero writes. Direct payloads already containing `writeResult` remain valid for rollout compatibility.
+
+The handler accepts both the new `mapResultManifests` accumulator and the old `mapResultsBucket` / `mapResultsKey` pair. The SSM payload, execution-history item, error threshold, categorization flow, and zero-files flow remain unchanged.
+
+Additional correctness properties:
+
+7. **Envelope normalization**: every ResultWriter SUCCEEDED row becomes exactly one normalized success or one observable failure; none is dropped or silently zeroed.
+8. **Whole-execution totality**: summary counts equal the sum of every unique batch manifest, independent of how the 500-file batches are partitioned.
+9. **Legacy event compatibility**: a single-manifest event produces the same summary as before, except that its real AWS envelope is now interpreted correctly.
 
 ## Rollout considerations
 

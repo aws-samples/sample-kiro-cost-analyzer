@@ -1334,8 +1334,14 @@ Resources:
             Description: Scheduled ETL execution
       Definition:
         Comment: "ETL Pipeline — processes S3 files in parallel (Standard Workflow)"
-        StartAt: ListNewFiles
+        StartAt: InitializeMapResultManifests
         States:
+          InitializeMapResultManifests:
+            Type: Pass
+            Result: []
+            ResultPath: "$.mapResultManifests"
+            Next: ListNewFiles
+
           ListNewFiles:
             Type: Task
             Resource: !GetAtt ListFilesFunction.Arn
@@ -1456,6 +1462,15 @@ Resources:
                 Bucket: !Ref DataBucket
                 Prefix: "etl-results"
             ResultPath: "$.mapResults"
+            Next: AccumulateMapResultManifest
+
+          AccumulateMapResultManifest:
+            Type: Pass
+            Parameters:
+              previous.$: "$.mapResultManifests"
+              bucket.$: "$.mapResults.ResultWriterDetails.Bucket"
+              key.$: "$.mapResults.ResultWriterDetails.Key"
+            ResultPath: "$.mapResultManifests"
             Next: CheckHasMore
 
           CheckHasMore:
@@ -1472,8 +1487,7 @@ Resources:
             Parameters:
               executionId.$: "$$.Execution.Id"
               listResult.$: "$.listResult"
-              mapResultsBucket.$: "$.mapResults.ResultWriterDetails.Bucket"
-              mapResultsKey.$: "$.mapResults.ResultWriterDetails.Key"
+              mapResultManifests.$: "$.mapResultManifests"
             ResultPath: "$.recordStatusResult"
             Next: CheckEtlErrors
 
