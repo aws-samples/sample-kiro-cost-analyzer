@@ -17,7 +17,7 @@
     "@cloudscape-design/design-tokens": "^3.0.78",
     "@cloudscape-design/global-styles": "^1.0.57",
     "amazon-cognito-identity-js": "^6.3.16",
-    "i18next": "26.0.8",
+    "i18next": "26.7.2",
     "i18next-resources-to-backend": "1.2.1",
     "d3-scale": "^4.0.2",
     "d3-selection": "^3.0.0",
